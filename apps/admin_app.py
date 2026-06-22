@@ -1,9 +1,18 @@
-"""Future entry point for the ECU Robot Admin Panel desktop application."""
+"""Desktop entry point for the ECU Robot Admin Panel."""
+
+import sys
+
+from PySide6.QtWidgets import QApplication
+
+from ui.admin.login_window import LoginWindow
 
 
 def main() -> None:
-    """Run the temporary Admin Panel placeholder."""
-    print("ECU Robot Admin Panel placeholder")
+    """Start the Admin Panel and display its login window."""
+    application = QApplication(sys.argv)
+    login_window = LoginWindow()
+    login_window.show()
+    application.exec()
 
 
 if __name__ == "__main__":

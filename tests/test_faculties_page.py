@@ -87,8 +87,8 @@ def test_faculties_page_refresh_updates_table(tmp_path) -> None:
         page.close()
 
 
-def test_faculties_page_table_is_read_only(tmp_path) -> None:
-    """Confirm table cells cannot be edited during this view-only phase."""
+def test_faculties_page_table_supports_controlled_editing(tmp_path) -> None:
+    """Confirm the table exposes edit triggers for controlled business fields."""
     db_path = _create_temp_db(tmp_path)
     application = _get_application()
     page = FacultiesPage(db_path=db_path)
@@ -96,7 +96,7 @@ def test_faculties_page_table_is_read_only(tmp_path) -> None:
         assert application is not None
         assert (
             page.faculties_table.editTriggers()
-            == QAbstractItemView.EditTrigger.NoEditTriggers
+            != QAbstractItemView.EditTrigger.NoEditTriggers
         )
     finally:
         page.close()

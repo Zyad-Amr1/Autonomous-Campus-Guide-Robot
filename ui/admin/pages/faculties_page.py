@@ -199,6 +199,8 @@ class FacultiesPage(QWidget):
         """Build the faculty table for the selected SQLite database."""
         super().__init__()
         self.db_path = db_path
+        self.has_unsaved_changes = False
+        self.is_loading_table = False
         self._build_ui()
         self._apply_styles()
         self.load_faculties()
@@ -240,11 +242,21 @@ class FacultiesPage(QWidget):
         self.edit_faculty_button.setObjectName("edit_faculty_button")
         self.delete_faculty_button = QPushButton("Delete Selected")
         self.delete_faculty_button.setObjectName("delete_faculty_button")
+        self.save_faculties_table_button = QPushButton("Save Table Changes")
+        self.save_faculties_table_button.setObjectName(
+            "save_faculties_table_button"
+        )
+        self.revert_faculties_table_button = QPushButton("Revert Changes")
+        self.revert_faculties_table_button.setObjectName(
+            "revert_faculties_table_button"
+        )
 
         for button in (
             self.add_faculty_button,
             self.edit_faculty_button,
             self.delete_faculty_button,
+            self.save_faculties_table_button,
+            self.revert_faculties_table_button,
         ):
             button.setMinimumHeight(40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -252,10 +264,16 @@ class FacultiesPage(QWidget):
         self.add_faculty_button.clicked.connect(self.add_faculty)
         self.edit_faculty_button.clicked.connect(self.edit_selected_faculty)
         self.delete_faculty_button.clicked.connect(self.delete_selected_faculty)
+        self.save_faculties_table_button.clicked.connect(self.save_table_changes)
+        self.revert_faculties_table_button.clicked.connect(
+            self.revert_table_changes
+        )
         action_layout.addWidget(self.add_faculty_button)
         action_layout.addWidget(self.edit_faculty_button)
         action_layout.addWidget(self.delete_faculty_button)
         action_layout.addStretch()
+        action_layout.addWidget(self.revert_faculties_table_button)
+        action_layout.addWidget(self.save_faculties_table_button)
 
         table_card = QFrame()
         table_card.setObjectName("faculties_table_card")
@@ -273,7 +291,9 @@ class FacultiesPage(QWidget):
             [heading for heading, _ in self._COLUMNS]
         )
         self.faculties_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.SelectedClicked
         )
         self.faculties_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -284,6 +304,7 @@ class FacultiesPage(QWidget):
         self.faculties_table.setAlternatingRowColors(True)
         self.faculties_table.setShowGrid(False)
         self.faculties_table.verticalHeader().setVisible(False)
+        self.faculties_table.itemChanged.connect(self._handle_item_changed)
 
         header = self.faculties_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -297,25 +318,93 @@ class FacultiesPage(QWidget):
 
     def load_faculties(self) -> None:
         """Load current faculty rows while keeping database failures non-fatal."""
+        self.is_loading_table = True
         try:
-            faculties = get_all_faculties(self.db_path)
-        except sqlite3.Error:
-            self.faculties_table.setRowCount(0)
+            try:
+                faculties = get_all_faculties(self.db_path)
+            except sqlite3.Error:
+                self.faculties_table.setRowCount(0)
+                self.has_unsaved_changes = False
+                self.faculties_status_label.setText(
+                    "Unable to load faculties due to a database error."
+                )
+                return
+
+            self.faculties_table.setRowCount(len(faculties))
+            for row_index, faculty in enumerate(faculties):
+                for column_index, (_, field_name) in enumerate(self._COLUMNS):
+                    value = faculty[field_name]
+                    item = QTableWidgetItem("" if value is None else str(value))
+                    if column_index in (0, 5, 6):
+                        item.setFlags(
+                            item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                        )
+                    if field_name == "id":
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.faculties_table.setItem(row_index, column_index, item)
+
+            self.has_unsaved_changes = False
             self.faculties_status_label.setText(
-                "Unable to load faculties due to a database error."
+                f"{len(faculties)} faculties found"
             )
+        finally:
+            self.is_loading_table = False
+
+    def _handle_item_changed(self, item: QTableWidgetItem) -> None:
+        """Track edits only for business columns outside table-loading cycles."""
+        if self.is_loading_table or item.column() not in (1, 2, 3, 4):
+            return
+        self.has_unsaved_changes = True
+        self.faculties_status_label.setText("Unsaved changes")
+
+    def save_table_changes(self) -> None:
+        """Validate and persist every inline-edited faculty business row."""
+        faculty_rows: list[tuple[int, dict]] = []
+        for row_index in range(self.faculties_table.rowCount()):
+            faculty_id = int(self.faculties_table.item(row_index, 0).text())
+            form_data = {
+                "name": self.faculties_table.item(row_index, 1).text().strip(),
+                "description": self.faculties_table.item(row_index, 2)
+                .text()
+                .strip(),
+                "building": self.faculties_table.item(row_index, 3).text().strip(),
+                "dean_name": self.faculties_table.item(row_index, 4).text().strip(),
+            }
+            if not form_data["name"]:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Faculty",
+                    "Faculty name cannot be empty.",
+                )
+                return
+            faculty_rows.append((faculty_id, form_data))
+
+        try:
+            for faculty_id, form_data in faculty_rows:
+                if not update_faculty(
+                    faculty_id,
+                    db_path=self.db_path,
+                    **form_data,
+                ):
+                    raise ValueError(
+                        f"Faculty record {faculty_id} could not be updated."
+                    )
+        except ValueError as error:
+            QMessageBox.warning(self, "Faculty Error", str(error))
+            return
+        except sqlite3.Error as error:
+            QMessageBox.critical(self, "Faculty Error", str(error))
             return
 
-        self.faculties_table.setRowCount(len(faculties))
-        for row_index, faculty in enumerate(faculties):
-            for column_index, (_, field_name) in enumerate(self._COLUMNS):
-                value = faculty[field_name]
-                item = QTableWidgetItem("" if value is None else str(value))
-                if field_name == "id":
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.faculties_table.setItem(row_index, column_index, item)
+        self.has_unsaved_changes = False
+        self.load_faculties()
+        self.faculties_status_label.setText("Changes saved successfully.")
 
-        self.faculties_status_label.setText(f"{len(faculties)} faculties found")
+    def revert_table_changes(self) -> None:
+        """Discard inline edits and restore the latest repository values."""
+        self.load_faculties()
+        self.has_unsaved_changes = False
+        self.faculties_status_label.setText("Changes reverted.")
 
     def _selected_faculty_id(self) -> int | None:
         """Return the selected row's stable faculty identifier when available."""
@@ -470,7 +559,9 @@ class FacultiesPage(QWidget):
             QPushButton#refresh_faculties_button,
             QPushButton#add_faculty_button,
             QPushButton#edit_faculty_button,
-            QPushButton#delete_faculty_button {{
+            QPushButton#delete_faculty_button,
+            QPushButton#save_faculties_table_button,
+            QPushButton#revert_faculties_table_button {{
                 background-color: {PRIMARY_COLOR};
                 color: #FFFFFF;
                 border: none;
@@ -491,6 +582,14 @@ class FacultiesPage(QWidget):
                 color: {TEXT_COLOR};
             }}
 
+            QPushButton#save_faculties_table_button {{
+                background-color: #047857;
+            }}
+
+            QPushButton#revert_faculties_table_button {{
+                background-color: #64748B;
+            }}
+
             QPushButton#delete_faculty_button {{
                 background-color: #B91C1C;
             }}
@@ -503,6 +602,14 @@ class FacultiesPage(QWidget):
 
             QPushButton#delete_faculty_button:hover {{
                 background-color: #991B1B;
+            }}
+
+            QPushButton#save_faculties_table_button:hover {{
+                background-color: #065F46;
+            }}
+
+            QPushButton#revert_faculties_table_button:hover {{
+                background-color: #475569;
             }}
             """
         )

@@ -1,5 +1,7 @@
 """Admin Dashboard shell providing navigation for future management pages."""
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -13,6 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from database.connection import DB_NAME
+from ui.admin.pages.dashboard_home_page import DashboardHomePage
 from ui.shared.theme import BACKGROUND_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, TEXT_COLOR
 
 
@@ -31,10 +35,15 @@ class AdminMainWindow(QMainWindow):
         ("logs", "Logs", "nav_logs"),
     )
 
-    def __init__(self, current_admin: dict) -> None:
+    def __init__(
+        self,
+        current_admin: dict,
+        db_path: str | Path = DB_NAME,
+    ) -> None:
         """Build the dashboard shell for the authenticated administrator."""
         super().__init__()
         self.current_admin = current_admin
+        self.db_path = db_path
         self.nav_buttons: dict[str, QPushButton] = {}
         self.setWindowTitle("ECU Robot Admin Panel")
         self.resize(1200, 750)
@@ -131,7 +140,9 @@ class AdminMainWindow(QMainWindow):
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("page_stack")
-        for _, title, _ in self._PAGE_DEFINITIONS:
+        self.dashboard_home_page = DashboardHomePage(self.db_path)
+        self.page_stack.addWidget(self.dashboard_home_page)
+        for _, title, _ in self._PAGE_DEFINITIONS[1:]:
             self.page_stack.addWidget(self._create_placeholder_page(title))
 
         content_layout.addWidget(header)

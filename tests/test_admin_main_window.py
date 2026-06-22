@@ -6,7 +6,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
+from database.init_db import initialize_database
 from ui.admin.main_window import AdminMainWindow
+from ui.admin.pages.dashboard_home_page import DashboardHomePage
 
 
 CURRENT_ADMIN = {
@@ -37,15 +39,18 @@ def _get_application() -> QApplication:
     return application
 
 
-def test_admin_main_window_contains_dashboard_shell() -> None:
+def test_admin_main_window_contains_dashboard_shell(tmp_path) -> None:
     """Confirm the authenticated shell exposes all planned navigation pages."""
+    database_path = tmp_path / "test_ecu_robot.db"
+    initialize_database(database_path)
     application = _get_application()
-    window = AdminMainWindow(CURRENT_ADMIN)
+    window = AdminMainWindow(CURRENT_ADMIN, database_path)
     try:
         assert application is not None
         assert window.windowTitle() == "ECU Robot Admin Panel"
         assert window.page_stack is not None
         assert window.page_stack.count() == 9
+        assert isinstance(window.page_stack.widget(0), DashboardHomePage)
         assert set(window.nav_buttons) == set(EXPECTED_NAVIGATION)
 
         for key, object_name in EXPECTED_NAVIGATION.items():
@@ -57,10 +62,12 @@ def test_admin_main_window_contains_dashboard_shell() -> None:
         window.close()
 
 
-def test_admin_main_window_navigation_switches_placeholder_pages() -> None:
+def test_admin_main_window_navigation_switches_placeholder_pages(tmp_path) -> None:
     """Confirm each sidebar button selects its matching placeholder page."""
+    database_path = tmp_path / "test_ecu_robot.db"
+    initialize_database(database_path)
     application = _get_application()
-    window = AdminMainWindow(CURRENT_ADMIN)
+    window = AdminMainWindow(CURRENT_ADMIN, database_path)
     try:
         assert application is not None
         for expected_index, key in enumerate(EXPECTED_NAVIGATION):

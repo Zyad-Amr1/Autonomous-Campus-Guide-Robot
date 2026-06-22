@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.env
+ecu_robot.db
+.pytest_cache/
+.mypy_cache/
+.idea/
+.vscode/

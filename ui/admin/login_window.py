@@ -1,4 +1,6 @@
-"""Admin Login Window layout for secure access to robot management tools."""
+"""Admin Login Window for secure access to robot management tools."""
+
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -7,11 +9,14 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from controllers.auth_controller import AuthController
+from database.connection import DB_NAME
 from ui.shared.theme import (
     BACKGROUND_COLOR,
     PRIMARY_COLOR,
@@ -21,11 +26,13 @@ from ui.shared.theme import (
 
 
 class LoginWindow(QWidget):
-    """Present the Admin Panel login form without authentication behavior."""
+    """Present and process secure Admin Panel login credentials."""
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: str | Path = DB_NAME) -> None:
         """Configure the window and construct its centered login card."""
         super().__init__()
+        self.auth_controller = AuthController(db_path)
+        self.current_admin: dict | None = None
         self.setWindowTitle("ECU Robot Admin Panel - Login")
         self.resize(900, 600)
         self.setMinimumSize(760, 520)
@@ -85,6 +92,7 @@ class LoginWindow(QWidget):
         self.login_button.setObjectName("login_button")
         self.login_button.setMinimumHeight(48)
         self.login_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.login_button.clicked.connect(self.handle_login)
 
         card_layout.addWidget(header_label)
         card_layout.addWidget(subtitle_label)
@@ -96,6 +104,27 @@ class LoginWindow(QWidget):
 
         page_layout.addWidget(login_card, alignment=Qt.AlignmentFlag.AlignCenter)
         page_layout.addStretch()
+
+    def handle_login(self) -> None:
+        """Authenticate the entered credentials without opening a dashboard yet."""
+        admin = self.auth_controller.login(
+            self.username_input.text(),
+            self.password_input.text(),
+        )
+
+        if admin is None:
+            self.current_admin = None
+            self.error_label.setText("Invalid username or password.")
+            self.error_label.setVisible(True)
+            return
+
+        self.current_admin = admin
+        self.error_label.clear()
+        QMessageBox.information(
+            self,
+            "Login Successful",
+            f"Welcome, {admin['full_name']}!",
+        )
 
     def _apply_styles(self) -> None:
         """Apply the shared ECU color palette to the login experience."""

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from database.init_db import initialize_database
 from ui.admin.main_window import AdminMainWindow
 from ui.admin.pages.dashboard_home_page import DashboardHomePage
+from ui.admin.pages.faculties_page import FacultiesPage
 
 
 CURRENT_ADMIN = {
@@ -51,6 +52,7 @@ def test_admin_main_window_contains_dashboard_shell(tmp_path) -> None:
         assert window.page_stack is not None
         assert window.page_stack.count() == 9
         assert isinstance(window.page_stack.widget(0), DashboardHomePage)
+        assert isinstance(window.page_stack.widget(1), FacultiesPage)
         assert set(window.nav_buttons) == set(EXPECTED_NAVIGATION)
 
         for key, object_name in EXPECTED_NAVIGATION.items():

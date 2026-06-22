@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from database.connection import DB_NAME
 from ui.admin.pages.dashboard_home_page import DashboardHomePage
+from ui.admin.pages.faculties_page import FacultiesPage
 from ui.shared.theme import BACKGROUND_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, TEXT_COLOR
 
 
@@ -142,7 +143,9 @@ class AdminMainWindow(QMainWindow):
         self.page_stack.setObjectName("page_stack")
         self.dashboard_home_page = DashboardHomePage(self.db_path)
         self.page_stack.addWidget(self.dashboard_home_page)
-        for _, title, _ in self._PAGE_DEFINITIONS[1:]:
+        self.faculties_page = FacultiesPage(self.db_path)
+        self.page_stack.addWidget(self.faculties_page)
+        for _, title, _ in self._PAGE_DEFINITIONS[2:]:
             self.page_stack.addWidget(self._create_placeholder_page(title))
 
         content_layout.addWidget(header)

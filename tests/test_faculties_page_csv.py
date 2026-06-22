@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from database.init_db import initialize_database
-from database.repositories.faculty_repository import create_faculty
+from database.repositories.faculty_repository import create_faculty, get_all_faculties
 from ui.admin.pages.faculties_page import FacultiesPage
 
 
@@ -27,23 +27,25 @@ def _create_temp_db(tmp_path):
 
 
 def test_faculties_page_has_csv_buttons(tmp_path) -> None:
-    """Confirm the page exposes both faculty CSV workflow actions."""
+    """Confirm the simplified toolbar exposes upload, export, and reload."""
     db_path = _create_temp_db(tmp_path)
     application = _get_application()
     page = FacultiesPage(db_path)
     try:
         assert application is not None
-        assert page.import_faculties_csv_button is not None
+        assert page.upload_faculties_csv_button is not None
         assert page.export_faculties_csv_button is not None
+        assert page.clear_faculties_csv_button is not None
+        assert not hasattr(page, "import_faculties_csv_button")
     finally:
         page.close()
 
 
-def test_faculties_page_import_csv_loads_rows_into_table(
+def test_faculties_page_upload_csv_automatically_imports_rows(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """Confirm a selected valid CSV imports and reloads the table."""
+    """Confirm Upload immediately imports into SQLite and reloads the table."""
     db_path = _create_temp_db(tmp_path)
     csv_path = tmp_path / "faculties.csv"
     csv_path.write_text(
@@ -61,10 +63,13 @@ def test_faculties_page_import_csv_loads_rows_into_table(
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
     try:
         assert application is not None
-        page.import_csv()
+        page.upload_csv()
 
         assert page.faculties_table.rowCount() == 1
         assert page.faculties_table.item(0, 1).text() == "Engineering"
+        assert [faculty["name"] for faculty in get_all_faculties(db_path)] == [
+            "Engineering"
+        ]
     finally:
         page.close()
 
@@ -93,11 +98,11 @@ def test_faculties_page_export_csv_writes_file(tmp_path, monkeypatch) -> None:
         page.close()
 
 
-def test_faculties_page_import_csv_cancel_does_nothing(
+def test_faculties_page_upload_csv_cancel_does_nothing(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """Confirm cancelling the import chooser leaves the page unchanged."""
+    """Confirm cancelling the upload chooser leaves the page unchanged."""
     db_path = _create_temp_db(tmp_path)
     application = _get_application()
     page = FacultiesPage(db_path)
@@ -108,7 +113,7 @@ def test_faculties_page_import_csv_cancel_does_nothing(
     )
     try:
         assert application is not None
-        page.import_csv()
+        page.upload_csv()
         assert page.faculties_table.rowCount() == 0
     finally:
         page.close()
@@ -131,5 +136,24 @@ def test_faculties_page_export_csv_cancel_does_nothing(
         assert application is not None
         page.export_csv()
         assert list(tmp_path.glob("*.csv")) == []
+    finally:
+        page.close()
+
+
+def test_faculties_page_clear_reload_table_reloads_database(tmp_path) -> None:
+    """Confirm Clear/Reload discards edits without deleting database data."""
+    db_path = _create_temp_db(tmp_path)
+    create_faculty("Engineering", db_path=db_path)
+    application = _get_application()
+    page = FacultiesPage(db_path)
+    try:
+        assert application is not None
+        page.faculties_table.item(0, 1).setText("Temporary Name")
+
+        page.clear_csv_or_reload_table()
+
+        assert page.faculties_table.item(0, 1).text() == "Engineering"
+        assert page.has_unsaved_changes is False
+        assert page.faculties_status_label.text() == "Table reloaded from database."
     finally:
         page.close()

@@ -234,20 +234,22 @@ class FacultiesPage(QWidget):
         self.refresh_faculties_button.setMinimumSize(110, 42)
         self.refresh_faculties_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_faculties_button.clicked.connect(self.load_faculties)
+        self.refresh_faculties_button.setHidden(True)
 
         heading_layout.addLayout(title_layout)
         heading_layout.addStretch()
-        heading_layout.addWidget(self.refresh_faculties_button)
 
         action_layout = QHBoxLayout()
         action_layout.setSpacing(10)
         self.add_faculty_button = QPushButton("Add Faculty")
         self.add_faculty_button.setObjectName("add_faculty_button")
+        self.add_faculty_button.setHidden(True)
         self.edit_faculty_button = QPushButton("Edit Selected")
         self.edit_faculty_button.setObjectName("edit_faculty_button")
-        self.delete_faculty_button = QPushButton("Delete Selected")
+        self.edit_faculty_button.setHidden(True)
+        self.delete_faculty_button = QPushButton("Delete Selected Row")
         self.delete_faculty_button.setObjectName("delete_faculty_button")
-        self.save_faculties_table_button = QPushButton("Save Table Changes")
+        self.save_faculties_table_button = QPushButton("Save Edits")
         self.save_faculties_table_button.setObjectName(
             "save_faculties_table_button"
         )
@@ -255,13 +257,18 @@ class FacultiesPage(QWidget):
         self.revert_faculties_table_button.setObjectName(
             "revert_faculties_table_button"
         )
-        self.import_faculties_csv_button = QPushButton("Import CSV")
-        self.import_faculties_csv_button.setObjectName(
-            "import_faculties_csv_button"
+        self.revert_faculties_table_button.setHidden(True)
+        self.upload_faculties_csv_button = QPushButton("Upload CSV")
+        self.upload_faculties_csv_button.setObjectName(
+            "upload_faculties_csv_button"
         )
         self.export_faculties_csv_button = QPushButton("Export CSV")
         self.export_faculties_csv_button.setObjectName(
             "export_faculties_csv_button"
+        )
+        self.clear_faculties_csv_button = QPushButton("Clear / Reload")
+        self.clear_faculties_csv_button.setObjectName(
+            "clear_faculties_csv_button"
         )
 
         for button in (
@@ -270,11 +277,21 @@ class FacultiesPage(QWidget):
             self.delete_faculty_button,
             self.save_faculties_table_button,
             self.revert_faculties_table_button,
-            self.import_faculties_csv_button,
+            self.upload_faculties_csv_button,
             self.export_faculties_csv_button,
+            self.clear_faculties_csv_button,
         ):
             button.setMinimumHeight(40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        for button in (
+            self.upload_faculties_csv_button,
+            self.save_faculties_table_button,
+            self.export_faculties_csv_button,
+            self.delete_faculty_button,
+            self.clear_faculties_csv_button,
+        ):
+            button.setMinimumWidth(125)
 
         self.add_faculty_button.clicked.connect(self.add_faculty)
         self.edit_faculty_button.clicked.connect(self.edit_selected_faculty)
@@ -283,16 +300,17 @@ class FacultiesPage(QWidget):
         self.revert_faculties_table_button.clicked.connect(
             self.revert_table_changes
         )
-        self.import_faculties_csv_button.clicked.connect(self.import_csv)
+        self.upload_faculties_csv_button.clicked.connect(self.upload_csv)
         self.export_faculties_csv_button.clicked.connect(self.export_csv)
-        action_layout.addWidget(self.add_faculty_button)
-        action_layout.addWidget(self.edit_faculty_button)
-        action_layout.addWidget(self.delete_faculty_button)
-        action_layout.addWidget(self.import_faculties_csv_button)
-        action_layout.addWidget(self.export_faculties_csv_button)
-        action_layout.addStretch()
-        action_layout.addWidget(self.revert_faculties_table_button)
+        self.clear_faculties_csv_button.clicked.connect(
+            self.clear_csv_or_reload_table
+        )
+        action_layout.addWidget(self.upload_faculties_csv_button)
         action_layout.addWidget(self.save_faculties_table_button)
+        action_layout.addWidget(self.export_faculties_csv_button)
+        action_layout.addWidget(self.delete_faculty_button)
+        action_layout.addWidget(self.clear_faculties_csv_button)
+        action_layout.addStretch()
 
         table_card = QFrame()
         table_card.setObjectName("faculties_table_card")
@@ -425,8 +443,8 @@ class FacultiesPage(QWidget):
         self.has_unsaved_changes = False
         self.faculties_status_label.setText("Changes reverted.")
 
-    def import_csv(self) -> None:
-        """Select, validate, import, and summarize a faculty CSV file."""
+    def upload_csv(self) -> None:
+        """Select a CSV and immediately import its valid rows into SQLite."""
         selected_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import Faculties CSV",
@@ -458,6 +476,12 @@ class FacultiesPage(QWidget):
                 short_errors += "\nAdditional errors were omitted."
             message += f"\n\n{short_errors}"
         QMessageBox.information(self, "Faculty CSV Import", message)
+
+    def clear_csv_or_reload_table(self) -> None:
+        """Discard unsaved table edits and reload current database values."""
+        self.load_faculties()
+        self.has_unsaved_changes = False
+        self.faculties_status_label.setText("Table reloaded from database.")
 
     def export_csv(self) -> None:
         """Select a destination and export the current faculty records."""
@@ -645,8 +669,9 @@ class FacultiesPage(QWidget):
             QPushButton#delete_faculty_button,
             QPushButton#save_faculties_table_button,
             QPushButton#revert_faculties_table_button,
-            QPushButton#import_faculties_csv_button,
-            QPushButton#export_faculties_csv_button {{
+            QPushButton#upload_faculties_csv_button,
+            QPushButton#export_faculties_csv_button,
+            QPushButton#clear_faculties_csv_button {{
                 background-color: {PRIMARY_COLOR};
                 color: #FFFFFF;
                 border: none;
@@ -675,9 +700,13 @@ class FacultiesPage(QWidget):
                 background-color: #64748B;
             }}
 
-            QPushButton#import_faculties_csv_button,
+            QPushButton#upload_faculties_csv_button,
             QPushButton#export_faculties_csv_button {{
                 background-color: #0F766E;
+            }}
+
+            QPushButton#clear_faculties_csv_button {{
+                background-color: #64748B;
             }}
 
             QPushButton#delete_faculty_button {{
@@ -702,9 +731,13 @@ class FacultiesPage(QWidget):
                 background-color: #475569;
             }}
 
-            QPushButton#import_faculties_csv_button:hover,
+            QPushButton#upload_faculties_csv_button:hover,
             QPushButton#export_faculties_csv_button:hover {{
                 background-color: #115E59;
+            }}
+
+            QPushButton#clear_faculties_csv_button:hover {{
+                background-color: #475569;
             }}
             """
         )

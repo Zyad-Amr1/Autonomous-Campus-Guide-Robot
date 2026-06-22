@@ -2,14 +2,13 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -27,6 +26,8 @@ from ui.shared.theme import (
 
 class LoginWindow(QWidget):
     """Present and process secure Admin Panel login credentials."""
+
+    login_successful = Signal(dict)
 
     def __init__(self, db_path: str | Path = DB_NAME) -> None:
         """Configure the window and construct its centered login card."""
@@ -120,11 +121,7 @@ class LoginWindow(QWidget):
 
         self.current_admin = admin
         self.error_label.clear()
-        QMessageBox.information(
-            self,
-            "Login Successful",
-            f"Welcome, {admin['full_name']}!",
-        )
+        self.login_successful.emit(admin)
 
     def _apply_styles(self) -> None:
         """Apply the shared ECU color palette to the login experience."""

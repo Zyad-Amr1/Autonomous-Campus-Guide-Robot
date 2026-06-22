@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -22,6 +23,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from controllers.faculty_csv_controller import (
+    export_faculties_to_csv,
+    import_faculties_from_csv,
+)
 from database.connection import DB_NAME
 from database.repositories.faculty_repository import (
     create_faculty,
@@ -250,6 +255,14 @@ class FacultiesPage(QWidget):
         self.revert_faculties_table_button.setObjectName(
             "revert_faculties_table_button"
         )
+        self.import_faculties_csv_button = QPushButton("Import CSV")
+        self.import_faculties_csv_button.setObjectName(
+            "import_faculties_csv_button"
+        )
+        self.export_faculties_csv_button = QPushButton("Export CSV")
+        self.export_faculties_csv_button.setObjectName(
+            "export_faculties_csv_button"
+        )
 
         for button in (
             self.add_faculty_button,
@@ -257,6 +270,8 @@ class FacultiesPage(QWidget):
             self.delete_faculty_button,
             self.save_faculties_table_button,
             self.revert_faculties_table_button,
+            self.import_faculties_csv_button,
+            self.export_faculties_csv_button,
         ):
             button.setMinimumHeight(40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -268,9 +283,13 @@ class FacultiesPage(QWidget):
         self.revert_faculties_table_button.clicked.connect(
             self.revert_table_changes
         )
+        self.import_faculties_csv_button.clicked.connect(self.import_csv)
+        self.export_faculties_csv_button.clicked.connect(self.export_csv)
         action_layout.addWidget(self.add_faculty_button)
         action_layout.addWidget(self.edit_faculty_button)
         action_layout.addWidget(self.delete_faculty_button)
+        action_layout.addWidget(self.import_faculties_csv_button)
+        action_layout.addWidget(self.export_faculties_csv_button)
         action_layout.addStretch()
         action_layout.addWidget(self.revert_faculties_table_button)
         action_layout.addWidget(self.save_faculties_table_button)
@@ -405,6 +424,70 @@ class FacultiesPage(QWidget):
         self.load_faculties()
         self.has_unsaved_changes = False
         self.faculties_status_label.setText("Changes reverted.")
+
+    def import_csv(self) -> None:
+        """Select, validate, import, and summarize a faculty CSV file."""
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Faculties CSV",
+            "",
+            "CSV Files (*.csv)",
+        )
+        if not selected_path:
+            return
+
+        try:
+            summary = import_faculties_from_csv(selected_path, self.db_path)
+        except (FileNotFoundError, ValueError, UnicodeError) as error:
+            QMessageBox.warning(self, "Faculty CSV Import", str(error))
+            return
+        except (OSError, sqlite3.Error) as error:
+            QMessageBox.critical(self, "Faculty CSV Import", str(error))
+            return
+
+        self.load_faculties()
+        message = (
+            f"Created: {summary['created']}\n"
+            f"Updated: {summary['updated']}\n"
+            f"Skipped: {summary['skipped']}\n"
+            f"Errors: {len(summary['errors'])}"
+        )
+        if summary["errors"]:
+            short_errors = "\n".join(summary["errors"][:3])
+            if len(summary["errors"]) > 3:
+                short_errors += "\nAdditional errors were omitted."
+            message += f"\n\n{short_errors}"
+        QMessageBox.information(self, "Faculty CSV Import", message)
+
+    def export_csv(self) -> None:
+        """Select a destination and export the current faculty records."""
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Faculties CSV",
+            "faculties.csv",
+            "CSV Files (*.csv)",
+        )
+        if not selected_path:
+            return
+
+        destination_path = Path(selected_path)
+        if destination_path.suffix.lower() != ".csv":
+            destination_path = Path(f"{destination_path}.csv")
+
+        try:
+            exported_count = export_faculties_to_csv(
+                destination_path,
+                self.db_path,
+            )
+        except (OSError, sqlite3.Error, ValueError) as error:
+            QMessageBox.critical(self, "Faculty CSV Export", str(error))
+            return
+
+        QMessageBox.information(
+            self,
+            "Faculty CSV Export",
+            f"Exported {exported_count} faculties successfully.",
+        )
 
     def _selected_faculty_id(self) -> int | None:
         """Return the selected row's stable faculty identifier when available."""
@@ -561,7 +644,9 @@ class FacultiesPage(QWidget):
             QPushButton#edit_faculty_button,
             QPushButton#delete_faculty_button,
             QPushButton#save_faculties_table_button,
-            QPushButton#revert_faculties_table_button {{
+            QPushButton#revert_faculties_table_button,
+            QPushButton#import_faculties_csv_button,
+            QPushButton#export_faculties_csv_button {{
                 background-color: {PRIMARY_COLOR};
                 color: #FFFFFF;
                 border: none;
@@ -590,6 +675,11 @@ class FacultiesPage(QWidget):
                 background-color: #64748B;
             }}
 
+            QPushButton#import_faculties_csv_button,
+            QPushButton#export_faculties_csv_button {{
+                background-color: #0F766E;
+            }}
+
             QPushButton#delete_faculty_button {{
                 background-color: #B91C1C;
             }}
@@ -610,6 +700,11 @@ class FacultiesPage(QWidget):
 
             QPushButton#revert_faculties_table_button:hover {{
                 background-color: #475569;
+            }}
+
+            QPushButton#import_faculties_csv_button:hover,
+            QPushButton#export_faculties_csv_button:hover {{
+                background-color: #115E59;
             }}
             """
         )

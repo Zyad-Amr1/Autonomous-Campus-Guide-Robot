@@ -1,5 +1,6 @@
 """Admin Dashboard page for viewing and managing university faculties."""
 
+import csv
 import sqlite3
 from pathlib import Path
 
@@ -23,10 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from controllers.faculty_csv_controller import (
-    export_faculties_to_csv,
-    import_faculties_from_csv,
-)
+from controllers.faculty_csv_controller import import_faculties_from_csv
 from database.connection import DB_NAME
 from database.repositories.faculty_repository import (
     create_faculty,
@@ -196,9 +194,9 @@ class FacultiesPage(QWidget):
         ("Description", "description"),
         ("Building", "building"),
         ("Dean Name", "dean_name"),
-        ("Created At", "created_at"),
-        ("Updated At", "updated_at"),
     )
+
+    _EXPORT_COLUMNS = ["id", "name", "description", "building", "dean_name"]
 
     def __init__(self, db_path: str | Path = DB_NAME) -> None:
         """Build the faculty table for the selected SQLite database."""
@@ -241,6 +239,7 @@ class FacultiesPage(QWidget):
 
         action_layout = QHBoxLayout()
         action_layout.setSpacing(10)
+        self.faculties_toolbar_layout = action_layout
         self.add_faculty_button = QPushButton("Add Faculty")
         self.add_faculty_button.setObjectName("add_faculty_button")
         self.add_faculty_button.setHidden(True)
@@ -266,10 +265,6 @@ class FacultiesPage(QWidget):
         self.export_faculties_csv_button.setObjectName(
             "export_faculties_csv_button"
         )
-        self.clear_faculties_csv_button = QPushButton("Clear / Reload")
-        self.clear_faculties_csv_button.setObjectName(
-            "clear_faculties_csv_button"
-        )
 
         for button in (
             self.add_faculty_button,
@@ -279,7 +274,6 @@ class FacultiesPage(QWidget):
             self.revert_faculties_table_button,
             self.upload_faculties_csv_button,
             self.export_faculties_csv_button,
-            self.clear_faculties_csv_button,
         ):
             button.setMinimumHeight(40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -289,9 +283,8 @@ class FacultiesPage(QWidget):
             self.save_faculties_table_button,
             self.export_faculties_csv_button,
             self.delete_faculty_button,
-            self.clear_faculties_csv_button,
         ):
-            button.setMinimumWidth(125)
+            button.setMinimumWidth(150)
 
         self.add_faculty_button.clicked.connect(self.add_faculty)
         self.edit_faculty_button.clicked.connect(self.edit_selected_faculty)
@@ -302,14 +295,10 @@ class FacultiesPage(QWidget):
         )
         self.upload_faculties_csv_button.clicked.connect(self.upload_csv)
         self.export_faculties_csv_button.clicked.connect(self.export_csv)
-        self.clear_faculties_csv_button.clicked.connect(
-            self.clear_csv_or_reload_table
-        )
         action_layout.addWidget(self.upload_faculties_csv_button)
-        action_layout.addWidget(self.save_faculties_table_button)
-        action_layout.addWidget(self.export_faculties_csv_button)
         action_layout.addWidget(self.delete_faculty_button)
-        action_layout.addWidget(self.clear_faculties_csv_button)
+        action_layout.addWidget(self.export_faculties_csv_button)
+        action_layout.addWidget(self.save_faculties_table_button)
         action_layout.addStretch()
 
         table_card = QFrame()
@@ -372,7 +361,7 @@ class FacultiesPage(QWidget):
                 for column_index, (_, field_name) in enumerate(self._COLUMNS):
                     value = faculty[field_name]
                     item = QTableWidgetItem("" if value is None else str(value))
-                    if column_index in (0, 5, 6):
+                    if column_index == 0:
                         item.setFlags(
                             item.flags() & ~Qt.ItemFlag.ItemIsEditable
                         )
@@ -499,10 +488,29 @@ class FacultiesPage(QWidget):
             destination_path = Path(f"{destination_path}.csv")
 
         try:
-            exported_count = export_faculties_to_csv(
-                destination_path,
-                self.db_path,
-            )
+            faculties = get_all_faculties(self.db_path)
+            with destination_path.open(
+                "w",
+                encoding="utf-8-sig",
+                newline="",
+            ) as csv_file:
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=self._EXPORT_COLUMNS,
+                )
+                writer.writeheader()
+                for faculty in faculties:
+                    writer.writerow(
+                        {
+                            column: (
+                                ""
+                                if faculty[column] is None
+                                else faculty[column]
+                            )
+                            for column in self._EXPORT_COLUMNS
+                        }
+                    )
+            exported_count = len(faculties)
         except (OSError, sqlite3.Error, ValueError) as error:
             QMessageBox.critical(self, "Faculty CSV Export", str(error))
             return
@@ -670,8 +678,7 @@ class FacultiesPage(QWidget):
             QPushButton#save_faculties_table_button,
             QPushButton#revert_faculties_table_button,
             QPushButton#upload_faculties_csv_button,
-            QPushButton#export_faculties_csv_button,
-            QPushButton#clear_faculties_csv_button {{
+            QPushButton#export_faculties_csv_button {{
                 background-color: {PRIMARY_COLOR};
                 color: #FFFFFF;
                 border: none;
@@ -705,10 +712,6 @@ class FacultiesPage(QWidget):
                 background-color: #0F766E;
             }}
 
-            QPushButton#clear_faculties_csv_button {{
-                background-color: #64748B;
-            }}
-
             QPushButton#delete_faculty_button {{
                 background-color: #B91C1C;
             }}
@@ -736,8 +739,5 @@ class FacultiesPage(QWidget):
                 background-color: #115E59;
             }}
 
-            QPushButton#clear_faculties_csv_button:hover {{
-                background-color: #475569;
-            }}
             """
         )

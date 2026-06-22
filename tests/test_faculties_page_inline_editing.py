@@ -58,18 +58,17 @@ def test_faculties_table_business_columns_are_editable(tmp_path) -> None:
 
 
 def test_faculties_table_system_columns_are_read_only(tmp_path) -> None:
-    """Confirm identifiers and audit timestamps cannot be edited inline."""
+    """Confirm the visible identifier column cannot be edited inline."""
     db_path = _create_temp_db(tmp_path)
     _create_faculty(db_path)
     application = _get_application()
     page = FacultiesPage(db_path)
     try:
         assert application is not None
-        for column_index in (0, 5, 6):
-            assert not (
-                page.faculties_table.item(0, column_index).flags()
-                & Qt.ItemFlag.ItemIsEditable
-            )
+        assert not (
+            page.faculties_table.item(0, 0).flags()
+            & Qt.ItemFlag.ItemIsEditable
+        )
     finally:
         page.close()
 

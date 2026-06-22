@@ -51,6 +51,22 @@ def test_faculties_page_shows_empty_table_for_empty_database(tmp_path) -> None:
         page.close()
 
 
+def test_faculties_page_shows_only_business_facing_columns(tmp_path) -> None:
+    """Confirm audit timestamps remain in SQLite but not in the visible table."""
+    db_path = _create_temp_db(tmp_path)
+    application = _get_application()
+    page = FacultiesPage(db_path=db_path)
+    try:
+        assert application is not None
+        assert page.faculties_table.columnCount() == 5
+        assert [
+            page.faculties_table.horizontalHeaderItem(column).text()
+            for column in range(page.faculties_table.columnCount())
+        ] == ["ID", "Name", "Description", "Building", "Dean Name"]
+    finally:
+        page.close()
+
+
 def test_faculties_page_loads_faculty_rows(tmp_path) -> None:
     """Confirm repository faculty rows and names appear in the table."""
     db_path = _create_temp_db(tmp_path)

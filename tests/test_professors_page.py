@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QPushButton
 
 from database.init_db import initialize_database
@@ -132,17 +133,33 @@ def test_professors_page_refresh_updates_table(tmp_path) -> None:
         page.close()
 
 
-def test_professors_page_table_is_read_only(tmp_path) -> None:
-    """Confirm professor cells cannot be edited during this view-only phase."""
+def test_professors_page_table_supports_controlled_editing(tmp_path) -> None:
+    """Confirm only supported professor business cells can be edited."""
     db_path = _create_temp_db(tmp_path)
+    faculty_id, room_id = _create_professor_dependencies(db_path)
+    create_professor(
+        "Dr. Mona Hassan",
+        "Professor",
+        faculty_id,
+        room_id,
+        db_path=db_path,
+    )
     application = _get_application()
     page = ProfessorsPage(db_path=db_path)
     try:
         assert application is not None
-        assert (
-            page.professors_table.editTriggers()
-            == QAbstractItemView.EditTrigger.NoEditTriggers
+        assert page.professors_table.editTriggers() != (
+            QAbstractItemView.EditTrigger.NoEditTriggers
         )
+        for column in (1, 2, 5, 6, 7, 8, 9):
+            assert page.professors_table.item(0, column).flags() & (
+                Qt.ItemFlag.ItemIsEditable
+            )
+        for column in (0, 3, 4):
+            assert not (
+                page.professors_table.item(0, column).flags()
+                & Qt.ItemFlag.ItemIsEditable
+            )
     finally:
         page.close()
 

@@ -24,6 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from controllers.professor_csv_controller import (
+    export_professors_to_csv,
+    import_professors_from_csv,
+)
 from database.connection import DB_NAME
 from database.repositories.faculty_repository import get_all_faculties
 from database.repositories.professor_repository import (
@@ -264,7 +268,7 @@ class ProfessorsPage(QWidget):
     """Display professor records and their joined academic/location details."""
 
     _COLUMNS = (
-        ("ID", "id"),
+        ("No.", None),
         ("Full Name", "full_name"),
         ("Title", "title"),
         ("Faculty", "faculty_name"),
@@ -274,14 +278,17 @@ class ProfessorsPage(QWidget):
         ("Office Hours", "office_hours"),
         ("Photo Path", "photo_path"),
         ("Bio", "bio"),
-        ("Created At", "created_at"),
-        ("Updated At", "updated_at"),
     )
+
+    _FACULTY_ID_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+    _OFFICE_ROOM_ID_ROLE = int(Qt.ItemDataRole.UserRole) + 2
 
     def __init__(self, db_path: str | Path = DB_NAME) -> None:
         """Build the professor table for the selected SQLite database."""
         super().__init__()
         self.db_path = db_path
+        self.has_unsaved_changes = False
+        self.is_loading_table = False
         self._build_ui()
         self._apply_styles()
         self.load_professors()
@@ -310,33 +317,54 @@ class ProfessorsPage(QWidget):
         self.refresh_professors_button.setMinimumSize(110, 42)
         self.refresh_professors_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_professors_button.clicked.connect(self.load_professors)
+        self.refresh_professors_button.setHidden(True)
 
         heading_layout.addLayout(title_layout)
         heading_layout.addStretch()
-        heading_layout.addWidget(self.refresh_professors_button)
 
         action_layout = QHBoxLayout()
         action_layout.setSpacing(10)
+        self.professors_toolbar_layout = action_layout
         self.add_professor_button = QPushButton("Add Professor")
         self.add_professor_button.setObjectName("add_professor_button")
+        self.add_professor_button.setHidden(True)
         self.edit_professor_button = QPushButton("Edit Selected")
         self.edit_professor_button.setObjectName("edit_professor_button")
-        self.delete_professor_button = QPushButton("Delete Selected")
+        self.edit_professor_button.setHidden(True)
+        self.upload_professors_csv_button = QPushButton("Upload CSV")
+        self.upload_professors_csv_button.setObjectName(
+            "upload_professors_csv_button"
+        )
+        self.delete_professor_button = QPushButton("Delete Selected Row")
         self.delete_professor_button.setObjectName("delete_professor_button")
+        self.export_professors_csv_button = QPushButton("Export CSV")
+        self.export_professors_csv_button.setObjectName(
+            "export_professors_csv_button"
+        )
+        self.save_professors_table_button = QPushButton("Save Edits")
+        self.save_professors_table_button.setObjectName(
+            "save_professors_table_button"
+        )
         for button in (
-            self.add_professor_button,
-            self.edit_professor_button,
+            self.upload_professors_csv_button,
             self.delete_professor_button,
+            self.export_professors_csv_button,
+            self.save_professors_table_button,
         ):
-            button.setMinimumSize(140, 40)
+            button.setMinimumSize(150, 40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             action_layout.addWidget(button)
         action_layout.addStretch()
 
         self.add_professor_button.clicked.connect(self.add_professor)
         self.edit_professor_button.clicked.connect(self.edit_selected_professor)
+        self.upload_professors_csv_button.clicked.connect(self.upload_csv)
         self.delete_professor_button.clicked.connect(
             self.delete_selected_professor
+        )
+        self.export_professors_csv_button.clicked.connect(self.export_csv)
+        self.save_professors_table_button.clicked.connect(
+            self.save_table_changes
         )
 
         table_card = QFrame()
@@ -355,7 +383,9 @@ class ProfessorsPage(QWidget):
             [heading for heading, _ in self._COLUMNS]
         )
         self.professors_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.SelectedClicked
         )
         self.professors_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -367,6 +397,7 @@ class ProfessorsPage(QWidget):
         self.professors_table.setShowGrid(False)
         self.professors_table.setWordWrap(False)
         self.professors_table.verticalHeader().setVisible(False)
+        self.professors_table.itemChanged.connect(self._handle_item_changed)
 
         header = self.professors_table.horizontalHeader()
         header.setMinimumSectionSize(80)
@@ -382,27 +413,60 @@ class ProfessorsPage(QWidget):
 
     def load_professors(self) -> None:
         """Load current professors while keeping database failures non-fatal."""
+        self.is_loading_table = True
         try:
-            professors = get_all_professors(self.db_path)
-        except sqlite3.Error:
-            self.professors_table.setRowCount(0)
+            try:
+                professors = get_all_professors(self.db_path)
+            except sqlite3.Error:
+                self.professors_table.setRowCount(0)
+                self.has_unsaved_changes = False
+                self.professors_status_label.setText(
+                    "Unable to load professors due to a database error."
+                )
+                return
+
+            self.professors_table.setRowCount(len(professors))
+            for row_index, professor in enumerate(professors):
+                for column_index, (_, field_name) in enumerate(self._COLUMNS):
+                    value = (
+                        row_index + 1
+                        if field_name is None
+                        else professor[field_name]
+                    )
+                    item = QTableWidgetItem("" if value is None else str(value))
+                    if column_index == 0:
+                        item.setData(
+                            Qt.ItemDataRole.UserRole,
+                            professor["id"],
+                        )
+                        item.setData(
+                            self._FACULTY_ID_ROLE,
+                            professor["faculty_id"],
+                        )
+                        item.setData(
+                            self._OFFICE_ROOM_ID_ROLE,
+                            professor["office_room_id"],
+                        )
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    if column_index in (0, 3, 4):
+                        item.setFlags(
+                            item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                        )
+                    self.professors_table.setItem(row_index, column_index, item)
+
+            self.has_unsaved_changes = False
             self.professors_status_label.setText(
-                "Unable to load professors due to a database error."
+                f"{len(professors)} professors found"
             )
+        finally:
+            self.is_loading_table = False
+
+    def _handle_item_changed(self, item: QTableWidgetItem) -> None:
+        """Track edits only for supported business columns."""
+        if self.is_loading_table or item.column() not in (1, 2, 5, 6, 7, 8, 9):
             return
-
-        self.professors_table.setRowCount(len(professors))
-        for row_index, professor in enumerate(professors):
-            for column_index, (_, field_name) in enumerate(self._COLUMNS):
-                value = professor[field_name]
-                item = QTableWidgetItem("" if value is None else str(value))
-                if field_name == "id":
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.professors_table.setItem(row_index, column_index, item)
-
-        self.professors_status_label.setText(
-            f"{len(professors)} professors found"
-        )
+        self.has_unsaved_changes = True
+        self.professors_status_label.setText("Unsaved changes")
 
     def _selected_professor_id(self) -> int | None:
         """Return the stable ID from the selected table row, when available."""
@@ -410,7 +474,125 @@ class ProfessorsPage(QWidget):
         if not selected_rows:
             return None
         id_item = self.professors_table.item(selected_rows[0].row(), 0)
-        return int(id_item.text()) if id_item is not None else None
+        if id_item is None:
+            return None
+        professor_id = id_item.data(Qt.ItemDataRole.UserRole)
+        return int(professor_id) if professor_id is not None else None
+
+    def upload_csv(self) -> None:
+        """Select a CSV and immediately import its valid rows into SQLite."""
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Professors CSV",
+            "",
+            "CSV Files (*.csv)",
+        )
+        if not selected_path:
+            return
+
+        try:
+            summary = import_professors_from_csv(selected_path, self.db_path)
+        except (FileNotFoundError, ValueError, UnicodeError) as error:
+            QMessageBox.warning(self, "Professor CSV Import", str(error))
+            return
+        except (OSError, sqlite3.Error) as error:
+            QMessageBox.critical(self, "Professor CSV Import", str(error))
+            return
+
+        self.load_professors()
+        message = (
+            f"Created: {summary['created']}\n"
+            f"Updated: {summary['updated']}\n"
+            f"Skipped: {summary['skipped']}\n"
+            f"Errors: {len(summary['errors'])}"
+        )
+        if summary["errors"]:
+            short_errors = "\n".join(summary["errors"][:3])
+            if len(summary["errors"]) > 3:
+                short_errors += "\nAdditional errors were omitted."
+            message += f"\n\n{short_errors}"
+        QMessageBox.information(self, "Professor CSV Import", message)
+
+    def export_csv(self) -> None:
+        """Select a destination and export current professor records."""
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Professors CSV",
+            "professors.csv",
+            "CSV Files (*.csv)",
+        )
+        if not selected_path:
+            return
+
+        destination_path = Path(selected_path)
+        if destination_path.suffix.lower() != ".csv":
+            destination_path = Path(f"{destination_path}.csv")
+        try:
+            exported_count = export_professors_to_csv(
+                destination_path,
+                self.db_path,
+            )
+        except (OSError, sqlite3.Error, ValueError) as error:
+            QMessageBox.critical(self, "Professor CSV Export", str(error))
+            return
+        QMessageBox.information(
+            self,
+            "Professor CSV Export",
+            f"Exported {exported_count} professors successfully.",
+        )
+
+    def save_table_changes(self) -> None:
+        """Validate and persist editable professor fields in every row."""
+        professor_rows: list[tuple[int, dict]] = []
+        for row_index in range(self.professors_table.rowCount()):
+            id_item = self.professors_table.item(row_index, 0)
+            professor_id = id_item.data(Qt.ItemDataRole.UserRole)
+            form_data = {
+                "full_name": self.professors_table.item(row_index, 1)
+                .text()
+                .strip(),
+                "title": self.professors_table.item(row_index, 2).text().strip(),
+                "faculty_id": id_item.data(self._FACULTY_ID_ROLE),
+                "office_room_id": id_item.data(self._OFFICE_ROOM_ID_ROLE),
+                "email": self.professors_table.item(row_index, 5).text().strip(),
+                "phone": self.professors_table.item(row_index, 6).text().strip(),
+                "office_hours": self.professors_table.item(row_index, 7)
+                .text()
+                .strip(),
+                "photo_path": self.professors_table.item(row_index, 8)
+                .text()
+                .strip(),
+                "bio": self.professors_table.item(row_index, 9).text().strip(),
+            }
+            if not form_data["full_name"]:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Professor",
+                    "Professor full name cannot be empty.",
+                )
+                return
+            professor_rows.append((int(professor_id), form_data))
+
+        try:
+            for professor_id, form_data in professor_rows:
+                if not update_professor(
+                    professor_id,
+                    db_path=self.db_path,
+                    **form_data,
+                ):
+                    raise ValueError(
+                        f"Professor record {professor_id} could not be updated."
+                    )
+        except ValueError as error:
+            QMessageBox.warning(self, "Professor Error", str(error))
+            return
+        except sqlite3.Error as error:
+            QMessageBox.critical(self, "Professor Error", str(error))
+            return
+
+        self.has_unsaved_changes = False
+        self.load_professors()
+        self.professors_status_label.setText("Changes saved successfully.")
 
     def add_professor(self) -> None:
         """Create a professor from an accepted form and reload the table."""
@@ -557,7 +739,10 @@ class ProfessorsPage(QWidget):
             QPushButton#refresh_professors_button,
             QPushButton#add_professor_button,
             QPushButton#edit_professor_button,
-            QPushButton#delete_professor_button {{
+            QPushButton#delete_professor_button,
+            QPushButton#upload_professors_csv_button,
+            QPushButton#export_professors_csv_button,
+            QPushButton#save_professors_table_button {{
                 background-color: {PRIMARY_COLOR};
                 color: #FFFFFF;
                 border: none;
@@ -571,7 +756,10 @@ class ProfessorsPage(QWidget):
             QPushButton#refresh_professors_button:hover,
             QPushButton#add_professor_button:hover,
             QPushButton#edit_professor_button:hover,
-            QPushButton#delete_professor_button:hover {{
+            QPushButton#delete_professor_button:hover,
+            QPushButton#upload_professors_csv_button:hover,
+            QPushButton#export_professors_csv_button:hover,
+            QPushButton#save_professors_table_button:hover {{
                 background-color: {SECONDARY_COLOR};
                 color: {TEXT_COLOR};
             }}

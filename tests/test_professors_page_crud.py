@@ -175,14 +175,14 @@ def test_professor_form_dialog_get_form_data_returns_expected_values(
 
 
 def test_professors_page_has_crud_buttons(tmp_path) -> None:
-    """Confirm the Professors page exposes all three management actions."""
+    """Confirm legacy dialog actions remain available but hidden from the toolbar."""
     db_path = _create_temp_db(tmp_path)
     application = _get_application()
     page = ProfessorsPage(db_path)
     try:
         assert application is not None
-        assert "Add" in page.add_professor_button.text()
-        assert "Edit" in page.edit_professor_button.text()
+        assert page.add_professor_button.isHidden()
+        assert page.edit_professor_button.isHidden()
         assert "Delete" in page.delete_professor_button.text()
     finally:
         page.close()

@@ -189,7 +189,7 @@ class FacultiesPage(QWidget):
     """Display and manage faculty records through a read-only table."""
 
     _COLUMNS = (
-        ("ID", "id"),
+        ("No.", None),
         ("Name", "name"),
         ("Description", "description"),
         ("Building", "building"),
@@ -359,13 +359,13 @@ class FacultiesPage(QWidget):
             self.faculties_table.setRowCount(len(faculties))
             for row_index, faculty in enumerate(faculties):
                 for column_index, (_, field_name) in enumerate(self._COLUMNS):
-                    value = faculty[field_name]
+                    value = row_index + 1 if field_name is None else faculty[field_name]
                     item = QTableWidgetItem("" if value is None else str(value))
                     if column_index == 0:
                         item.setFlags(
                             item.flags() & ~Qt.ItemFlag.ItemIsEditable
                         )
-                    if field_name == "id":
+                        item.setData(Qt.ItemDataRole.UserRole, faculty["id"])
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.faculties_table.setItem(row_index, column_index, item)
 
@@ -387,7 +387,9 @@ class FacultiesPage(QWidget):
         """Validate and persist every inline-edited faculty business row."""
         faculty_rows: list[tuple[int, dict]] = []
         for row_index in range(self.faculties_table.rowCount()):
-            faculty_id = int(self.faculties_table.item(row_index, 0).text())
+            faculty_id = self.faculties_table.item(row_index, 0).data(
+                Qt.ItemDataRole.UserRole
+            )
             form_data = {
                 "name": self.faculties_table.item(row_index, 1).text().strip(),
                 "description": self.faculties_table.item(row_index, 2)
@@ -527,7 +529,10 @@ class FacultiesPage(QWidget):
         if not selected_rows:
             return None
         id_item = self.faculties_table.item(selected_rows[0].row(), 0)
-        return int(id_item.text()) if id_item is not None else None
+        if id_item is None:
+            return None
+        faculty_id = id_item.data(Qt.ItemDataRole.UserRole)
+        return int(faculty_id) if faculty_id is not None else None
 
     def add_faculty(self) -> None:
         """Open the faculty form and create a record when it is accepted."""

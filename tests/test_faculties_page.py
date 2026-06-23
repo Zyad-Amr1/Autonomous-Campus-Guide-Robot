@@ -4,10 +4,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QPushButton
 
 from database.init_db import initialize_database
-from database.repositories.faculty_repository import create_faculty
+from database.repositories.faculty_repository import create_faculty, delete_faculty
 from ui.admin.pages.faculties_page import FacultiesPage
 
 
@@ -62,7 +63,7 @@ def test_faculties_page_shows_only_business_facing_columns(tmp_path) -> None:
         assert [
             page.faculties_table.horizontalHeaderItem(column).text()
             for column in range(page.faculties_table.columnCount())
-        ] == ["ID", "Name", "Description", "Building", "Dean Name"]
+        ] == ["No.", "Name", "Description", "Building", "Dean Name"]
     finally:
         page.close()
 
@@ -82,6 +83,33 @@ def test_faculties_page_loads_faculty_rows(tmp_path) -> None:
             for row in range(page.faculties_table.rowCount())
         }
         assert names == {"Engineering", "Business"}
+    finally:
+        page.close()
+
+
+def test_faculties_page_shows_row_numbers_and_stores_real_ids(tmp_path) -> None:
+    """Confirm display numbers stay sequential while database IDs remain internal."""
+    db_path = _create_temp_db(tmp_path)
+    first_id = create_faculty("Temporary", db_path=db_path)
+    delete_faculty(first_id, db_path)
+    real_ids = {
+        "Engineering": create_faculty("Engineering", db_path=db_path),
+        "Business": create_faculty("Business", db_path=db_path),
+    }
+    application = _get_application()
+    page = FacultiesPage(db_path=db_path)
+    try:
+        assert application is not None
+        number_items = [
+            page.faculties_table.item(row, 0)
+            for row in range(page.faculties_table.rowCount())
+        ]
+        assert [item.text() for item in number_items] == ["1", "2"]
+        for row, number_item in enumerate(number_items):
+            faculty_name = page.faculties_table.item(row, 1).text()
+            assert number_item.data(Qt.ItemDataRole.UserRole) == real_ids[
+                faculty_name
+            ]
     finally:
         page.close()
 

@@ -7,7 +7,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from database.init_db import initialize_database
-from database.repositories.faculty_repository import create_faculty
+from database.repositories.faculty_repository import (
+    create_faculty,
+    delete_faculty,
+    get_faculty_by_id,
+)
 from ui.admin.pages import faculties_page as faculties_page_module
 from ui.admin.pages.faculties_page import FacultiesPage, FacultyFormDialog
 
@@ -172,7 +176,9 @@ def test_faculties_page_delete_selected_faculty_removes_row(
 ) -> None:
     """Confirm a confirmed Delete action removes the selected faculty."""
     db_path = _create_temp_db(tmp_path)
-    create_faculty("Engineering", db_path=db_path)
+    deleted_id = create_faculty("Temporary", db_path=db_path)
+    delete_faculty(deleted_id, db_path)
+    faculty_id = create_faculty("Engineering", db_path=db_path)
     application = _get_application()
     page = FacultiesPage(db_path)
     monkeypatch.setattr(
@@ -182,10 +188,12 @@ def test_faculties_page_delete_selected_faculty_removes_row(
     )
     try:
         assert application is not None
+        assert page.faculties_table.item(0, 0).text() == "1"
         page.faculties_table.selectRow(0)
         page.delete_selected_faculty()
 
         assert page.faculties_table.rowCount() == 0
+        assert get_faculty_by_id(faculty_id, db_path) is None
     finally:
         page.close()
 

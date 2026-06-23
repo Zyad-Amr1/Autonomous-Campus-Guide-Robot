@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from database.init_db import initialize_database
 from database.repositories.faculty_repository import (
     create_faculty,
+    delete_faculty,
     get_faculty_by_id,
 )
 from ui.admin.pages.faculties_page import FacultiesPage
@@ -105,11 +106,14 @@ def test_editing_cell_marks_unsaved_changes(tmp_path) -> None:
 def test_save_table_changes_updates_database(tmp_path) -> None:
     """Confirm saving inline edits persists all business fields."""
     db_path = _create_temp_db(tmp_path)
+    deleted_id = _create_faculty(db_path)
+    delete_faculty(deleted_id, db_path)
     faculty_id = _create_faculty(db_path)
     application = _get_application()
     page = FacultiesPage(db_path)
     try:
         assert application is not None
+        assert page.faculties_table.item(0, 0).text() == "1"
         page.faculties_table.item(0, 1).setText("Applied Engineering")
         page.faculties_table.item(0, 2).setText("Updated programs")
         page.faculties_table.item(0, 3).setText("Building B")

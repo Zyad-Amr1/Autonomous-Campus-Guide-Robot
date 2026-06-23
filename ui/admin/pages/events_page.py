@@ -109,8 +109,17 @@ class EventsPage(QWidget):
                     item = QTableWidgetItem("" if value is None else str(value))
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, event["id"])
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                        )
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    else:
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsEditable
+                        )
                     self.events_table.setItem(row, column, item)
             self.events_status_label.setText(f"{len(events)} events found")
         finally:
@@ -209,7 +218,9 @@ class EventsPage(QWidget):
             QLabel#events_page_title {{ color: {PRIMARY_COLOR}; font-size: 27px; font-weight: 700; }}
             QLabel#events_page_subtitle, QLabel#events_status_label {{ color: #64748B; }}
             QFrame#events_table_card {{ background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }}
-            QTableWidget#events_table {{ background: #FFFFFF; alternate-background-color: #F8FAFC; border: 1px solid #E2E8F0; selection-background-color: #DCE8F5; }}
+            QTableWidget#events_table {{ background-color: #FFFFFF; alternate-background-color: #F8FAFC; color: #0F172A; gridline-color: #E2E8F0; border: 1px solid #E2E8F0; selection-background-color: #DBEAFE; selection-color: #0F172A; }}
+            QTableWidget#events_table::item {{ color: #0F172A; }}
+            QTableWidget#events_table::item:selected {{ background-color: #DBEAFE; color: #0F172A; }}
             QHeaderView::section {{ background: {PRIMARY_COLOR}; color: #FFFFFF; border: none; padding: 10px; font-weight: 700; }}
             QPushButton {{ background: {PRIMARY_COLOR}; color: #FFFFFF; border: none; border-radius: 8px; padding: 0 18px; font-weight: 700; }}
             QPushButton:hover {{ background: {SECONDARY_COLOR}; color: {TEXT_COLOR}; }}

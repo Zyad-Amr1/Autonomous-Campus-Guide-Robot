@@ -71,7 +71,18 @@ class FAQPage(QWidget):
                     value = row + 1 if field is None else faq[field]
                     item = QTableWidgetItem("" if value is None else str(value))
                     if column == 0:
-                        item.setData(Qt.ItemDataRole.UserRole, faq["id"]); item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable); item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        item.setData(Qt.ItemDataRole.UserRole, faq["id"])
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                        )
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    else:
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsEditable
+                        )
                     self.faq_table.setItem(row, column, item)
             self.faq_status_label.setText(f"{len(faqs)} FAQ entries found")
         finally: self.is_loading_table = False
@@ -133,7 +144,9 @@ class FAQPage(QWidget):
             QLabel#faq_page_title {{ color: {PRIMARY_COLOR}; font-size: 27px; font-weight: 700; }}
             QLabel#faq_page_subtitle, QLabel#faq_status_label {{ color: #64748B; }}
             QFrame#faq_table_card {{ background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }}
-            QTableWidget#faq_table {{ background: #FFFFFF; alternate-background-color: #F8FAFC; border: 1px solid #E2E8F0; selection-background-color: #DCE8F5; }}
+            QTableWidget#faq_table {{ background-color: #FFFFFF; alternate-background-color: #F8FAFC; color: #0F172A; gridline-color: #E2E8F0; border: 1px solid #E2E8F0; selection-background-color: #DBEAFE; selection-color: #0F172A; }}
+            QTableWidget#faq_table::item {{ color: #0F172A; }}
+            QTableWidget#faq_table::item:selected {{ background-color: #DBEAFE; color: #0F172A; }}
             QHeaderView::section {{ background: {PRIMARY_COLOR}; color: #FFFFFF; border: none; padding: 10px; font-weight: 700; }}
             QPushButton {{ background: {PRIMARY_COLOR}; color: #FFFFFF; border: none; border-radius: 8px; padding: 0 18px; font-weight: 700; }}
             QPushButton:hover {{ background: {SECONDARY_COLOR}; color: {TEXT_COLOR}; }}

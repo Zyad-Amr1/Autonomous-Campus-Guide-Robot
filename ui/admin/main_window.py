@@ -19,6 +19,7 @@ from database.connection import DB_NAME
 from ui.admin.pages.dashboard_home_page import DashboardHomePage
 from ui.admin.pages.faculties_page import FacultiesPage
 from ui.admin.pages.professors_page import ProfessorsPage
+from ui.admin.pages.rooms_page import RoomsPage
 from ui.shared.theme import BACKGROUND_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, TEXT_COLOR
 
 
@@ -148,7 +149,9 @@ class AdminMainWindow(QMainWindow):
         self.page_stack.addWidget(self.faculties_page)
         self.professors_page = ProfessorsPage(self.db_path)
         self.page_stack.addWidget(self.professors_page)
-        for _, title, _ in self._PAGE_DEFINITIONS[3:]:
+        self.rooms_page = RoomsPage(self.db_path)
+        self.page_stack.addWidget(self.rooms_page)
+        for _, title, _ in self._PAGE_DEFINITIONS[4:]:
             self.page_stack.addWidget(self._create_placeholder_page(title))
 
         content_layout.addWidget(header)

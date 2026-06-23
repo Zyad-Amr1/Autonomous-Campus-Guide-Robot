@@ -11,6 +11,7 @@ from ui.admin.main_window import AdminMainWindow
 from ui.admin.pages.dashboard_home_page import DashboardHomePage
 from ui.admin.pages.faculties_page import FacultiesPage
 from ui.admin.pages.professors_page import ProfessorsPage
+from ui.admin.pages.rooms_page import RoomsPage
 
 
 CURRENT_ADMIN = {
@@ -55,6 +56,7 @@ def test_admin_main_window_contains_dashboard_shell(tmp_path) -> None:
         assert isinstance(window.page_stack.widget(0), DashboardHomePage)
         assert isinstance(window.page_stack.widget(1), FacultiesPage)
         assert isinstance(window.page_stack.widget(2), ProfessorsPage)
+        assert isinstance(window.page_stack.widget(3), RoomsPage)
         assert set(window.nav_buttons) == set(EXPECTED_NAVIGATION)
 
         for key, object_name in EXPECTED_NAVIGATION.items():

@@ -22,6 +22,8 @@ class FAQPage(QWidget):
 
     def __init__(self, db_path: str | Path = DB_NAME) -> None:
         super().__init__()
+        self.setObjectName("faq_page")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.db_path = db_path
         self.is_loading_table = False
         self._build_ui()
@@ -127,7 +129,7 @@ class FAQPage(QWidget):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(f"""
-            FAQPage {{ background: {BACKGROUND_COLOR}; color: {TEXT_COLOR}; font-family: "Segoe UI"; }}
+            QWidget#faq_page {{ background-color: {BACKGROUND_COLOR}; color: {TEXT_COLOR}; font-family: "Segoe UI"; }}
             QLabel#faq_page_title {{ color: {PRIMARY_COLOR}; font-size: 27px; font-weight: 700; }}
             QLabel#faq_page_subtitle, QLabel#faq_status_label {{ color: #64748B; }}
             QFrame#faq_table_card {{ background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }}

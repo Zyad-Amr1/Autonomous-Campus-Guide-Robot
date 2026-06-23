@@ -507,6 +507,13 @@ class ProfessorsPage(QWidget):
             f"Errors: {len(summary['errors'])}"
         )
         if summary["errors"]:
+            if any("does not exist" in error for error in summary["errors"]):
+                message += (
+                    "\n\nSome professor rows were skipped because their "
+                    "faculty_id or office_room_id does not exist.\n"
+                    "Import order should be:\n"
+                    "faculties.csv → rooms.csv → professors.csv"
+                )
             short_errors = "\n".join(summary["errors"][:3])
             if len(summary["errors"]) > 3:
                 short_errors += "\nAdditional errors were omitted."

@@ -28,6 +28,8 @@ class EventsPage(QWidget):
     def __init__(self, db_path: str | Path = DB_NAME) -> None:
         """Build the Events page for the selected database."""
         super().__init__()
+        self.setObjectName("events_page")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.db_path = db_path
         self.is_loading_table = False
         self._build_ui()
@@ -203,7 +205,7 @@ class EventsPage(QWidget):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(f"""
-            EventsPage {{ background: {BACKGROUND_COLOR}; color: {TEXT_COLOR}; font-family: "Segoe UI"; }}
+            QWidget#events_page {{ background-color: {BACKGROUND_COLOR}; color: {TEXT_COLOR}; font-family: "Segoe UI"; }}
             QLabel#events_page_title {{ color: {PRIMARY_COLOR}; font-size: 27px; font-weight: 700; }}
             QLabel#events_page_subtitle, QLabel#events_status_label {{ color: #64748B; }}
             QFrame#events_table_card {{ background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }}

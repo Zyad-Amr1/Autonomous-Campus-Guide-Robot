@@ -14,6 +14,16 @@ def _db(tmp_path): path = tmp_path / "test.db"; initialize_database(path); retur
 def _faq(db): return create_faq("Where is admissions?", "Main Building", "admissions", "Campus", db)
 
 
+def test_faq_page_has_layout_and_styled_background(tmp_path):
+    """Confirm the real page paints an opaque dashboard background."""
+    app = _app(); page = FAQPage(_db(tmp_path))
+    try:
+        assert app; assert page.layout() is not None; assert page.styleSheet().strip()
+        assert page.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        assert page.objectName() == "faq_page"
+    finally: page.close()
+
+
 def test_faq_page_has_correct_toolbar_buttons(tmp_path):
     app = _app(); page = FAQPage(_db(tmp_path))
     try: assert app; assert [page.faq_toolbar_layout.itemAt(i).widget().objectName() for i in range(4)] == ["upload_faq_csv_button", "delete_faq_button", "export_faq_csv_button", "save_faq_table_button"]

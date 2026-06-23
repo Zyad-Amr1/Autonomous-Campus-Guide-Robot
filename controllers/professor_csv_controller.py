@@ -4,12 +4,14 @@ import csv
 import sqlite3
 from pathlib import Path
 
+from database.repositories.faculty_repository import get_faculty_by_id
 from database.repositories.professor_repository import (
     create_professor,
     get_all_professors,
     get_professor_by_id,
     update_professor,
 )
+from database.repositories.room_repository import get_room_by_id
 
 REQUIRED_COLUMNS = {"full_name", "faculty_id"}
 NEW_ONLY_COLUMNS = [
@@ -112,6 +114,21 @@ def import_professors_from_csv(csv_path: str | Path, db_path) -> dict:
                     "photo_path": row["photo_path"],
                     "bio": row["bio"],
                 }
+                faculty_id = professor_data["faculty_id"]
+                if get_faculty_by_id(faculty_id, db_path) is None:
+                    raise ValueError(
+                        f"faculty_id {faculty_id} does not exist. "
+                        "Import faculties.csv first or use a valid faculty_id."
+                    )
+                office_room_id = professor_data["office_room_id"]
+                if (
+                    office_room_id is not None
+                    and get_room_by_id(office_room_id, db_path) is None
+                ):
+                    raise ValueError(
+                        f"office_room_id {office_room_id} does not exist. "
+                        "Import rooms.csv first or leave office_room_id empty."
+                    )
                 raw_id = row.get("id", "")
                 if raw_id:
                     professor_id = _required_integer(raw_id, "id")

@@ -143,6 +143,43 @@ def test_professors_page_upload_csv_automatically_imports_rows(
         page.close()
 
 
+def test_professors_page_upload_csv_reports_missing_relationships(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Confirm skipped foreign keys produce clear import-order guidance."""
+    db_path = _create_temp_db(tmp_path)
+    csv_path = tmp_path / "professors.csv"
+    csv_path.write_text(
+        "full_name,title,faculty_id,office_room_id,email,phone,office_hours,"
+        "photo_path,bio\nDr. Missing,Professor,9999,,,,,,\n",
+        encoding="utf-8",
+    )
+    messages: list[str] = []
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(csv_path), "CSV Files (*.csv)"),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *args, **kwargs: messages.append(args[2]),
+    )
+    application = _get_application()
+    page = ProfessorsPage(db_path)
+    try:
+        assert application is not None
+        page.upload_csv()
+        assert page.professors_table.rowCount() == 0
+        assert "Skipped: 1" in messages[0]
+        assert "faculty_id or office_room_id does not exist" in messages[0]
+        assert "faculties.csv → rooms.csv → professors.csv" in messages[0]
+        assert "FOREIGN KEY constraint failed" not in messages[0]
+    finally:
+        page.close()
+
+
 def test_professors_page_export_csv_writes_file(tmp_path, monkeypatch) -> None:
     """Confirm Export writes the documented professor CSV."""
     db_path = _create_temp_db(tmp_path)

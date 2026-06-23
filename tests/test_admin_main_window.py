@@ -85,5 +85,9 @@ def test_admin_main_window_navigation_switches_placeholder_pages(tmp_path) -> No
         for expected_index, key in enumerate(EXPECTED_NAVIGATION):
             window.nav_buttons[key].click()
             assert window.page_stack.currentIndex() == expected_index
+        window.nav_buttons["events"].click()
+        assert isinstance(window.page_stack.currentWidget(), EventsPage)
+        window.nav_buttons["faq"].click()
+        assert isinstance(window.page_stack.currentWidget(), FAQPage)
     finally:
         window.close()

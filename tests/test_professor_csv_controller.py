@@ -181,6 +181,42 @@ def test_import_professors_from_csv_skips_invalid_faculty_id_rows(
     assert get_all_professors(db_path) == []
 
 
+def test_import_professors_skips_missing_faculty_with_clear_error(tmp_path) -> None:
+    """Confirm a well-formed but absent faculty ID gets actionable guidance."""
+    db_path = _create_temp_db(tmp_path)
+    _, room_id = _create_dependencies(db_path)
+    csv_path = tmp_path / "professors.csv"
+    _write_csv(csv_path, NEW_ONLY_COLUMNS, [_new_row(9999, room_id)])
+
+    summary = import_professors_from_csv(csv_path, db_path)
+
+    assert summary["skipped"] == 1
+    assert summary["created"] == 0
+    assert summary["errors"] == [
+        "Row 2: faculty_id 9999 does not exist. "
+        "Import faculties.csv first or use a valid faculty_id."
+    ]
+    assert get_all_professors(db_path) == []
+
+
+def test_import_professors_skips_missing_room_with_clear_error(tmp_path) -> None:
+    """Confirm a well-formed but absent office room gets actionable guidance."""
+    db_path = _create_temp_db(tmp_path)
+    faculty_id, _ = _create_dependencies(db_path)
+    csv_path = tmp_path / "professors.csv"
+    _write_csv(csv_path, NEW_ONLY_COLUMNS, [_new_row(faculty_id, 9999)])
+
+    summary = import_professors_from_csv(csv_path, db_path)
+
+    assert summary["skipped"] == 1
+    assert summary["created"] == 0
+    assert summary["errors"] == [
+        "Row 2: office_room_id 9999 does not exist. "
+        "Import rooms.csv first or leave office_room_id empty."
+    ]
+    assert get_all_professors(db_path) == []
+
+
 def test_export_professors_to_csv_writes_expected_columns_and_rows(
     tmp_path,
 ) -> None:

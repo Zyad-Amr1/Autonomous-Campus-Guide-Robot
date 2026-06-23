@@ -14,6 +14,16 @@ def _db(tmp_path): path = tmp_path / "test.db"; initialize_database(path); retur
 def _event(db): return create_event("Open Day", "Welcome", "Campus", "2026-07-01", "2026-07-01", "10:00", "14:00", db)
 
 
+def test_events_page_has_layout_and_styled_background(tmp_path):
+    """Confirm the real page paints an opaque dashboard background."""
+    app = _app(); page = EventsPage(_db(tmp_path))
+    try:
+        assert app; assert page.layout() is not None; assert page.styleSheet().strip()
+        assert page.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        assert page.objectName() == "events_page"
+    finally: page.close()
+
+
 def test_events_page_has_correct_toolbar_buttons(tmp_path):
     app = _app(); page = EventsPage(_db(tmp_path))
     try: assert app; assert [page.events_toolbar_layout.itemAt(i).widget().objectName() for i in range(4)] == ["upload_events_csv_button", "delete_event_button", "export_events_csv_button", "save_events_table_button"]

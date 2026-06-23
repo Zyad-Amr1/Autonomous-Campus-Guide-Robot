@@ -104,17 +104,24 @@ def test_rooms_page_refresh_updates_table(tmp_path) -> None:
         page.close()
 
 
-def test_rooms_page_table_is_read_only(tmp_path) -> None:
-    """Confirm room cells cannot be edited in the table-view phase."""
+def test_rooms_page_table_supports_controlled_editing(tmp_path) -> None:
+    """Confirm room business cells are editable while No. remains read-only."""
     db_path = _create_temp_db(tmp_path)
+    _create_room(db_path)
     application = _get_application()
     page = RoomsPage(db_path)
     try:
         assert application is not None
-        assert (
-            page.rooms_table.editTriggers()
-            == QAbstractItemView.EditTrigger.NoEditTriggers
+        assert page.rooms_table.editTriggers() != (
+            QAbstractItemView.EditTrigger.NoEditTriggers
         )
+        assert not (
+            page.rooms_table.item(0, 0).flags() & Qt.ItemFlag.ItemIsEditable
+        )
+        for column in range(1, 9):
+            assert page.rooms_table.item(0, column).flags() & (
+                Qt.ItemFlag.ItemIsEditable
+            )
     finally:
         page.close()
 

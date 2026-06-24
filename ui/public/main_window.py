@@ -1,124 +1,202 @@
-"""Top-level window and navigation for the public robot dashboard."""
+"""Stable fullscreen shell for the ECU Smart Assistant public dashboard."""
 
-from PySide6.QtWidgets import QMainWindow, QStackedWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from ui.public.screens.home_screen import HomeScreen
-from ui.public.screens.placeholder_screen import PlaceholderScreen
+from ui.public.theme import (
+    APP_BACKGROUND_STYLE,
+    CARD_PADDING,
+    GLASS_CARD_STYLE,
+    GOLD,
+    HEADER_STYLE,
+    NAVY,
+    NAVY_DARK,
+    OFF_WHITE,
+    SIDEBAR_BUTTON_STYLE,
+    SIDEBAR_WIDTH,
+    SUBTITLE_STYLE,
+    TOUCH_BUTTON_HEIGHT,
+    WHITE,
+)
 
 
 class PublicMainWindow(QMainWindow):
-    """Host the touch-friendly public experience as a simple page stack."""
+    """Display the fast, touch-friendly public dashboard shell."""
+
+    _SIDEBAR_ITEMS = (
+        ("⌂  Home", "sidebar_home_button"),
+        ("◇  Map", "sidebar_map_button"),
+        ("♟  Staff", "sidebar_staff_button"),
+        ("▤  Schedule", "sidebar_schedule_button"),
+        ("◆  News", "sidebar_news_button"),
+        ("ⓘ  About", "sidebar_about_button"),
+        ("◉  Chat", "sidebar_chat_button"),
+    )
 
     def __init__(self) -> None:
-        """Create the home page and the eight public feature placeholders."""
+        """Create one sidebar and one static content card without navigation."""
         super().__init__()
-        self.setWindowTitle("ECU Robot Assistant")
+        self.setWindowTitle("ECU Smart Assistant")
         self.setObjectName("public_main_window")
         self.setMinimumSize(1280, 800)
+        self.sidebar_buttons: dict[str, QPushButton] = {}
+        self._build_ui()
 
-        self.public_page_stack = QStackedWidget()
-        self.public_page_stack.setObjectName("public_page_stack")
-        self.setCentralWidget(self.public_page_stack)
-
-        self.home_screen = HomeScreen(self)
-        self.public_page_stack.addWidget(self.home_screen)
-
-        placeholder_pages = (
-            (
-                "Campus Map",
-                "Room finder and campus navigation will be connected here.",
-                "MAP",
-            ),
-            (
-                "Ask Chatbot",
-                "The ECU question-answer assistant will be connected here.",
-                "AI",
-            ),
-            (
-                "University Information",
-                "Explore university data and services from one place.",
-                "ECU",
-            ),
-            (
-                "Faculties",
-                "Faculty information will be displayed here.",
-                "FAC",
-            ),
-            (
-                "Professors",
-                "Professor search and office information will be displayed here.",
-                "PROF",
-            ),
-            (
-                "Courses",
-                "Course schedules and room details will be displayed here.",
-                "COURSE",
-            ),
-            (
-                "Events",
-                "Campus events and important dates will be displayed here.",
-                "EVENT",
-            ),
-            (
-                "FAQ",
-                "Common questions and answers will be displayed here.",
-                "FAQ",
-            ),
+    def _build_ui(self) -> None:
+        """Build the two-column public shell using lightweight Qt widgets."""
+        central_widget = QWidget()
+        central_widget.setObjectName("public_shell_central_widget")
+        central_widget.setStyleSheet(
+            APP_BACKGROUND_STYLE.replace(
+                "QWidget {",
+                "QWidget#public_shell_central_widget {",
+                1,
+            )
         )
-        self.placeholder_screens: list[PlaceholderScreen] = []
-        for title, subtitle, icon in placeholder_pages:
-            screen = PlaceholderScreen(title, subtitle, icon, self)
-            self.placeholder_screens.append(screen)
-            self.public_page_stack.addWidget(screen)
+        self.setCentralWidget(central_widget)
 
-        # Apply styles only after every page belongs to the stack. Styling a
-        # top-level widget before addWidget() makes Qt recursively re-polish it
-        # during reparenting and can stall startup on some font configurations.
-        self.setStyleSheet(
-            """
-            QMainWindow#public_main_window,
-            QStackedWidget#public_page_stack {
-                background-color: #07182D;
+        shell_layout = QHBoxLayout(central_widget)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+
+        sidebar = self._create_sidebar()
+        content = self._create_content()
+        shell_layout.addWidget(sidebar)
+        shell_layout.addWidget(content, stretch=1)
+
+    def _create_sidebar(self) -> QFrame:
+        """Create the visual-only navigation rail for future public pages."""
+        sidebar = QFrame()
+        sidebar.setObjectName("public_shell_sidebar")
+        sidebar.setFixedWidth(SIDEBAR_WIDTH)
+        sidebar.setStyleSheet(
+            f"""
+            QFrame#public_shell_sidebar {{
+                background-color: {NAVY};
                 border: none;
-            }
+            }}
             """
         )
-        self.home_screen.apply_styles()
-        for screen in self.placeholder_screens:
-            screen.apply_styles()
 
-    def show_home(self) -> None:
-        """Return to the public dashboard home screen."""
-        self.public_page_stack.setCurrentIndex(0)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(22, 34, 22, 28)
+        sidebar_layout.setSpacing(12)
 
-    def show_map(self) -> None:
-        """Open the Campus Map placeholder."""
-        self.public_page_stack.setCurrentIndex(1)
+        app_title = QLabel("ECU Smart\nAssistant")
+        app_title.setObjectName("public_sidebar_title")
+        app_title.setStyleSheet(
+            f"color: {GOLD}; font-size: 25px; font-weight: 800;"
+        )
+        app_subtitle = QLabel("Public Robot Guide")
+        app_subtitle.setObjectName("public_sidebar_subtitle")
+        app_subtitle.setStyleSheet(
+            f"color: {OFF_WHITE}; font-size: 13px; font-weight: 600;"
+        )
+        sidebar_layout.addWidget(app_title)
+        sidebar_layout.addWidget(app_subtitle)
+        sidebar_layout.addSpacing(24)
 
-    def show_chatbot(self) -> None:
-        """Open the Ask Chatbot placeholder."""
-        self.public_page_stack.setCurrentIndex(2)
+        for label, object_name in self._SIDEBAR_ITEMS:
+            button = QPushButton(label)
+            button.setObjectName(object_name)
+            button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(SIDEBAR_BUTTON_STYLE)
+            self.sidebar_buttons[object_name] = button
+            sidebar_layout.addWidget(button)
 
-    def show_university_info(self) -> None:
-        """Open the University Information placeholder."""
-        self.public_page_stack.setCurrentIndex(3)
+        sidebar_layout.addStretch()
+        footer = QLabel("Egyptian Chinese University")
+        footer.setObjectName("public_sidebar_footer")
+        footer.setWordWrap(True)
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        footer.setStyleSheet(f"color: {OFF_WHITE}; font-size: 11px;")
+        sidebar_layout.addWidget(footer)
+        return sidebar
 
-    def show_faculties(self) -> None:
-        """Open the Faculties placeholder."""
-        self.public_page_stack.setCurrentIndex(4)
+    def _create_content(self) -> QFrame:
+        """Create the static welcome card for this shell-only sub-step."""
+        content = QFrame()
+        content.setObjectName("public_shell_content")
+        content.setStyleSheet(
+            f"""
+            QFrame#public_shell_content {{
+                background-color: {NAVY_DARK};
+                border: none;
+            }}
+            """
+        )
 
-    def show_professors(self) -> None:
-        """Open the Professors placeholder."""
-        self.public_page_stack.setCurrentIndex(5)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(64, 64, 64, 64)
+        content_layout.addStretch()
 
-    def show_courses(self) -> None:
-        """Open the Courses placeholder."""
-        self.public_page_stack.setCurrentIndex(6)
+        welcome_card = QFrame()
+        welcome_card.setObjectName("public_shell_welcome_card")
+        welcome_card.setMinimumHeight(420)
+        welcome_card.setStyleSheet(
+            GLASS_CARD_STYLE.replace(
+                "QFrame {",
+                "QFrame#public_shell_welcome_card {",
+                1,
+            )
+        )
+        card_layout = QVBoxLayout(welcome_card)
+        card_layout.setContentsMargins(
+            CARD_PADDING * 2,
+            CARD_PADDING * 2,
+            CARD_PADDING * 2,
+            CARD_PADDING * 2,
+        )
+        card_layout.setSpacing(20)
 
-    def show_events(self) -> None:
-        """Open the Events placeholder."""
-        self.public_page_stack.setCurrentIndex(7)
+        eyebrow = QLabel("PUBLIC ROBOT DASHBOARD")
+        eyebrow.setObjectName("public_shell_eyebrow")
+        eyebrow.setStyleSheet(
+            f"color: {GOLD}; font-size: 14px; font-weight: 800;"
+        )
+        self.public_shell_title = QLabel("Welcome to ECU Smart Assistant")
+        self.public_shell_title.setObjectName("public_shell_title")
+        self.public_shell_title.setStyleSheet(HEADER_STYLE)
+        self.public_shell_subtitle = QLabel(
+            "Public dashboard shell is ready. Navigation will be connected "
+            "in the next step."
+        )
+        self.public_shell_subtitle.setObjectName("public_shell_subtitle")
+        self.public_shell_subtitle.setWordWrap(True)
+        self.public_shell_subtitle.setStyleSheet(SUBTITLE_STYLE)
+        future_features = QLabel(
+            "Campus Map   •   Chatbot   •   University Information"
+        )
+        future_features.setObjectName("public_shell_future_features")
+        future_features.setWordWrap(True)
+        future_features.setStyleSheet(
+            f"""
+            color: {WHITE};
+            background-color: rgba(255, 255, 255, 20);
+            border: 1px solid rgba(255, 255, 255, 45);
+            border-radius: 16px;
+            padding: 18px 22px;
+            font-size: 18px;
+            font-weight: 600;
+            """
+        )
 
-    def show_faq(self) -> None:
-        """Open the FAQ placeholder."""
-        self.public_page_stack.setCurrentIndex(8)
+        card_layout.addWidget(eyebrow)
+        card_layout.addWidget(self.public_shell_title)
+        card_layout.addWidget(self.public_shell_subtitle)
+        card_layout.addSpacing(14)
+        card_layout.addWidget(future_features)
+        card_layout.addStretch()
+
+        content_layout.addWidget(welcome_card)
+        content_layout.addStretch()
+        return content

@@ -1,4 +1,4 @@
-"""Desktop entry point for the ECU Robot Public Assistant."""
+"""Desktop entry point for the ECU Smart Assistant public dashboard."""
 
 import sys
 
@@ -8,9 +8,9 @@ from ui.public.main_window import PublicMainWindow
 
 
 def main() -> None:
-    """Start the standalone public robot dashboard."""
+    """Start the standalone public robot dashboard shell."""
     application = QApplication(sys.argv)
-    application.setApplicationName("ECU Robot Assistant")
+    application.setApplicationName("ECU Smart Assistant")
     window = PublicMainWindow()
     window.show()
     application.exec()

@@ -177,7 +177,14 @@ class RoomsPage(QWidget):
                         item.setData(Qt.ItemDataRole.UserRole, room["id"])
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         item.setFlags(
-                            item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                        )
+                    else:
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsEditable
                         )
                     self.rooms_table.setItem(row_index, column_index, item)
 
@@ -429,10 +436,20 @@ class RoomsPage(QWidget):
                 background-color: #FFFFFF;
                 alternate-background-color: #F8FAFC;
                 color: {TEXT_COLOR};
+                gridline-color: #E2E8F0;
                 border: 1px solid #E2E8F0;
                 border-radius: 8px;
-                selection-background-color: #DCE8F5;
+                selection-background-color: #DBEAFE;
                 selection-color: {TEXT_COLOR};
+            }}
+
+            QTableWidget#rooms_table::item {{
+                color: {TEXT_COLOR};
+            }}
+
+            QTableWidget#rooms_table::item:selected {{
+                background-color: #DBEAFE;
+                color: {TEXT_COLOR};
             }}
 
             QHeaderView::section {{

@@ -115,13 +115,13 @@ def test_rooms_page_table_supports_controlled_editing(tmp_path) -> None:
         assert page.rooms_table.editTriggers() != (
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
-        assert not (
-            page.rooms_table.item(0, 0).flags() & Qt.ItemFlag.ItemIsEditable
+        read_only_flags = (
+            Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         )
+        editable_flags = read_only_flags | Qt.ItemFlag.ItemIsEditable
+        assert page.rooms_table.item(0, 0).flags() == read_only_flags
         for column in range(1, 9):
-            assert page.rooms_table.item(0, column).flags() & (
-                Qt.ItemFlag.ItemIsEditable
-            )
+            assert page.rooms_table.item(0, column).flags() == editable_flags
     finally:
         page.close()
 

@@ -134,6 +134,7 @@ def test_faculties_page_refresh_updates_table(tmp_path) -> None:
 def test_faculties_page_table_supports_controlled_editing(tmp_path) -> None:
     """Confirm the table exposes edit triggers for controlled business fields."""
     db_path = _create_temp_db(tmp_path)
+    create_faculty("Engineering", db_path=db_path)
     application = _get_application()
     page = FacultiesPage(db_path=db_path)
     try:
@@ -142,6 +143,13 @@ def test_faculties_page_table_supports_controlled_editing(tmp_path) -> None:
             page.faculties_table.editTriggers()
             != QAbstractItemView.EditTrigger.NoEditTriggers
         )
+        read_only_flags = (
+            Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        )
+        editable_flags = read_only_flags | Qt.ItemFlag.ItemIsEditable
+        assert page.faculties_table.item(0, 0).flags() == read_only_flags
+        for column in range(1, 5):
+            assert page.faculties_table.item(0, column).flags() == editable_flags
     finally:
         page.close()
 

@@ -151,15 +151,14 @@ def test_professors_page_table_supports_controlled_editing(tmp_path) -> None:
         assert page.professors_table.editTriggers() != (
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
+        read_only_flags = (
+            Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        )
+        editable_flags = read_only_flags | Qt.ItemFlag.ItemIsEditable
         for column in (1, 2, 5, 6, 7, 8, 9):
-            assert page.professors_table.item(0, column).flags() & (
-                Qt.ItemFlag.ItemIsEditable
-            )
+            assert page.professors_table.item(0, column).flags() == editable_flags
         for column in (0, 3, 4):
-            assert not (
-                page.professors_table.item(0, column).flags()
-                & Qt.ItemFlag.ItemIsEditable
-            )
+            assert page.professors_table.item(0, column).flags() == read_only_flags
     finally:
         page.close()
 

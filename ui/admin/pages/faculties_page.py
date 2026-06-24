@@ -363,10 +363,17 @@ class FacultiesPage(QWidget):
                     item = QTableWidgetItem("" if value is None else str(value))
                     if column_index == 0:
                         item.setFlags(
-                            item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
                         )
                         item.setData(Qt.ItemDataRole.UserRole, faculty["id"])
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    else:
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsEditable
+                        )
                     self.faculties_table.setItem(row_index, column_index, item)
 
             self.has_unsaved_changes = False
@@ -661,10 +668,20 @@ class FacultiesPage(QWidget):
                 background-color: #FFFFFF;
                 alternate-background-color: #F8FAFC;
                 color: {TEXT_COLOR};
+                gridline-color: #E2E8F0;
                 border: 1px solid #E2E8F0;
                 border-radius: 8px;
-                selection-background-color: #DCE8F5;
+                selection-background-color: #DBEAFE;
                 selection-color: {TEXT_COLOR};
+            }}
+
+            QTableWidget#faculties_table::item {{
+                color: {TEXT_COLOR};
+            }}
+
+            QTableWidget#faculties_table::item:selected {{
+                background-color: #DBEAFE;
+                color: {TEXT_COLOR};
             }}
 
             QHeaderView::section {{

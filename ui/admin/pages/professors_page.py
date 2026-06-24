@@ -450,7 +450,14 @@ class ProfessorsPage(QWidget):
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if column_index in (0, 3, 4):
                         item.setFlags(
-                            item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                        )
+                    else:
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled
+                            | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsEditable
                         )
                     self.professors_table.setItem(row_index, column_index, item)
 
@@ -728,10 +735,20 @@ class ProfessorsPage(QWidget):
                 background-color: #FFFFFF;
                 alternate-background-color: #F8FAFC;
                 color: {TEXT_COLOR};
+                gridline-color: #E2E8F0;
                 border: 1px solid #E2E8F0;
                 border-radius: 8px;
-                selection-background-color: #DCE8F5;
+                selection-background-color: #DBEAFE;
                 selection-color: {TEXT_COLOR};
+            }}
+
+            QTableWidget#professors_table::item {{
+                color: {TEXT_COLOR};
+            }}
+
+            QTableWidget#professors_table::item:selected {{
+                background-color: #DBEAFE;
+                color: {TEXT_COLOR};
             }}
 
             QHeaderView::section {{

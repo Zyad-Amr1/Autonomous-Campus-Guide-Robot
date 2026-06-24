@@ -1,6 +1,7 @@
 """Headless tests for the standalone public robot dashboard shell."""
 
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -27,6 +28,18 @@ def test_public_main_window_can_be_created() -> None:
         assert window.windowTitle() == "ECU Robot Assistant"
         assert window.objectName() == "public_main_window"
         assert window.public_page_stack.objectName() == "public_page_stack"
+    finally:
+        window.close()
+
+
+def test_public_main_window_constructs_without_startup_stall() -> None:
+    application = _get_application()
+    started_at = time.perf_counter()
+    window = PublicMainWindow()
+    elapsed = time.perf_counter() - started_at
+    try:
+        assert application is not None
+        assert elapsed < 3.0
     finally:
         window.close()
 
@@ -128,7 +141,7 @@ def test_home_and_placeholder_buttons_drive_navigation() -> None:
 
 def test_placeholder_screen_has_back_home_button() -> None:
     application = _get_application()
-    screen = PlaceholderScreen("Campus Map", "Find your destination.", "🗺️")
+    screen = PlaceholderScreen("Campus Map", "Find your destination.", "MAP")
     try:
         assert application is not None
         assert isinstance(screen.back_home_button, QPushButton)

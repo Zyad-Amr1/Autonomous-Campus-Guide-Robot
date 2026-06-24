@@ -19,7 +19,7 @@ class PlaceholderScreen(QWidget):
         self,
         title: str,
         subtitle: str,
-        icon: str = "✨",
+        icon: str = "INFO",
         parent_window=None,
     ) -> None:
         """Build one public feature placeholder with optional navigation."""
@@ -28,7 +28,8 @@ class PlaceholderScreen(QWidget):
         self.setObjectName("placeholder_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui(title, subtitle, icon)
-        self._apply_styles()
+        if parent_window is None:
+            self.apply_styles()
 
     def _build_ui(self, title: str, subtitle: str, icon: str) -> None:
         """Arrange the feature identity and central coming-soon card."""
@@ -46,6 +47,7 @@ class PlaceholderScreen(QWidget):
 
         self.placeholder_icon_label = QLabel(icon)
         self.placeholder_icon_label.setObjectName("placeholder_icon_label")
+        self.placeholder_icon_label.setFixedSize(100, 70)
         self.placeholder_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder_title_label = QLabel(title)
         self.placeholder_title_label.setObjectName("placeholder_title_label")
@@ -59,7 +61,7 @@ class PlaceholderScreen(QWidget):
         )
         self.placeholder_message_label.setObjectName("placeholder_message_label")
         self.placeholder_message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.back_home_button = QPushButton("←  Back to Home")
+        self.back_home_button = QPushButton("Back to Home")
         self.back_home_button.setObjectName("back_home_button")
         self.back_home_button.setMinimumSize(240, 60)
         self.back_home_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -72,7 +74,10 @@ class PlaceholderScreen(QWidget):
         if callback is not None:
             self.back_home_button.clicked.connect(callback)
 
-        card_layout.addWidget(self.placeholder_icon_label)
+        card_layout.addWidget(
+            self.placeholder_icon_label,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
         card_layout.addWidget(self.placeholder_title_label)
         card_layout.addWidget(self.placeholder_subtitle_label)
         card_layout.addSpacing(8)
@@ -86,7 +91,7 @@ class PlaceholderScreen(QWidget):
         page_layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignCenter)
         page_layout.addStretch()
 
-    def _apply_styles(self) -> None:
+    def apply_styles(self) -> None:
         """Apply the same premium kiosk palette as the public home page."""
         self.setStyleSheet(
             """
@@ -103,8 +108,11 @@ class PlaceholderScreen(QWidget):
             }
 
             QLabel#placeholder_icon_label {
-                color: #F6C85F;
-                font-size: 66px;
+                background-color: #F6C85F;
+                color: #10233A;
+                border-radius: 16px;
+                font-size: 16px;
+                font-weight: 800;
             }
 
             QLabel#placeholder_title_label {

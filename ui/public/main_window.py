@@ -19,6 +19,61 @@ class PublicMainWindow(QMainWindow):
         self.public_page_stack = QStackedWidget()
         self.public_page_stack.setObjectName("public_page_stack")
         self.setCentralWidget(self.public_page_stack)
+
+        self.home_screen = HomeScreen(self)
+        self.public_page_stack.addWidget(self.home_screen)
+
+        placeholder_pages = (
+            (
+                "Campus Map",
+                "Room finder and campus navigation will be connected here.",
+                "MAP",
+            ),
+            (
+                "Ask Chatbot",
+                "The ECU question-answer assistant will be connected here.",
+                "AI",
+            ),
+            (
+                "University Information",
+                "Explore university data and services from one place.",
+                "ECU",
+            ),
+            (
+                "Faculties",
+                "Faculty information will be displayed here.",
+                "FAC",
+            ),
+            (
+                "Professors",
+                "Professor search and office information will be displayed here.",
+                "PROF",
+            ),
+            (
+                "Courses",
+                "Course schedules and room details will be displayed here.",
+                "COURSE",
+            ),
+            (
+                "Events",
+                "Campus events and important dates will be displayed here.",
+                "EVENT",
+            ),
+            (
+                "FAQ",
+                "Common questions and answers will be displayed here.",
+                "FAQ",
+            ),
+        )
+        self.placeholder_screens: list[PlaceholderScreen] = []
+        for title, subtitle, icon in placeholder_pages:
+            screen = PlaceholderScreen(title, subtitle, icon, self)
+            self.placeholder_screens.append(screen)
+            self.public_page_stack.addWidget(screen)
+
+        # Apply styles only after every page belongs to the stack. Styling a
+        # top-level widget before addWidget() makes Qt recursively re-polish it
+        # during reparenting and can stall startup on some font configurations.
         self.setStyleSheet(
             """
             QMainWindow#public_main_window,
@@ -28,56 +83,9 @@ class PublicMainWindow(QMainWindow):
             }
             """
         )
-
-        self.home_screen = HomeScreen(self)
-        self.public_page_stack.addWidget(self.home_screen)
-
-        placeholder_pages = (
-            (
-                "Campus Map",
-                "Room finder and campus navigation will be connected here.",
-                "🗺️",
-            ),
-            (
-                "Ask Chatbot",
-                "The ECU question-answer assistant will be connected here.",
-                "🤖",
-            ),
-            (
-                "University Information",
-                "Explore university data and services from one place.",
-                "🏛️",
-            ),
-            (
-                "Faculties",
-                "Faculty information will be displayed here.",
-                "🎓",
-            ),
-            (
-                "Professors",
-                "Professor search and office information will be displayed here.",
-                "👨‍🏫",
-            ),
-            (
-                "Courses",
-                "Course schedules and room details will be displayed here.",
-                "📚",
-            ),
-            (
-                "Events",
-                "Campus events and important dates will be displayed here.",
-                "📅",
-            ),
-            (
-                "FAQ",
-                "Common questions and answers will be displayed here.",
-                "❓",
-            ),
-        )
-        for title, subtitle, icon in placeholder_pages:
-            self.public_page_stack.addWidget(
-                PlaceholderScreen(title, subtitle, icon, self)
-            )
+        self.home_screen.apply_styles()
+        for screen in self.placeholder_screens:
+            screen.apply_styles()
 
     def show_home(self) -> None:
         """Return to the public dashboard home screen."""

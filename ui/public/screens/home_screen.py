@@ -24,7 +24,8 @@ class HomeScreen(QWidget):
         self.setObjectName("public_home_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
-        self._apply_styles()
+        if parent_window is None:
+            self.apply_styles()
 
     def _build_ui(self) -> None:
         """Arrange the branded header, hero, feature cards, and footer."""
@@ -41,7 +42,7 @@ class HomeScreen(QWidget):
         university_label.setObjectName("public_university_label")
         brand_layout.addWidget(brand_label)
         brand_layout.addWidget(university_label)
-        touchscreen_badge = QLabel("●  TOUCHSCREEN GUIDE")
+        touchscreen_badge = QLabel("TOUCHSCREEN GUIDE")
         touchscreen_badge.setObjectName("touchscreen_badge")
         touchscreen_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_layout.addLayout(brand_layout)
@@ -68,7 +69,7 @@ class HomeScreen(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(22)
         map_card, self.map_button = self._create_main_card(
-            "🗺️",
+            "MAP",
             "Campus Map",
             "Find rooms, buildings, offices, and important places.",
             "Open Map",
@@ -76,7 +77,7 @@ class HomeScreen(QWidget):
             "show_map",
         )
         chatbot_card, self.chatbot_button = self._create_main_card(
-            "🤖",
+            "AI",
             "Ask Chatbot",
             "Ask about ECU, admissions, schedules, services, and more.",
             "Ask Now",
@@ -84,7 +85,7 @@ class HomeScreen(QWidget):
             "show_chatbot",
         )
         info_card, self.university_info_button = self._create_main_card(
-            "🏛️",
+            "ECU",
             "University Info",
             "Browse faculties, professors, courses, events, and FAQs.",
             "Explore Info",
@@ -113,6 +114,7 @@ class HomeScreen(QWidget):
         for text, object_name, method_name in quick_actions:
             button = QPushButton(text)
             button.setObjectName(object_name)
+            button.setProperty("buttonRole", "quick")
             button.setMinimumHeight(50)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setSizePolicy(
@@ -153,6 +155,8 @@ class HomeScreen(QWidget):
 
         icon_label = QLabel(icon)
         icon_label.setObjectName("topic_icon_label")
+        icon_label.setFixedSize(72, 52)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label = QLabel(title)
         title_label.setObjectName("topic_title_label")
         description_label = QLabel(description)
@@ -162,6 +166,7 @@ class HomeScreen(QWidget):
 
         button = QPushButton(button_text)
         button.setObjectName(button_name)
+        button.setProperty("buttonRole", "primary")
         button.setMinimumHeight(58)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._connect_navigation(button, method_name)
@@ -182,7 +187,7 @@ class HomeScreen(QWidget):
         if callback is not None:
             button.clicked.connect(callback)
 
-    def _apply_styles(self) -> None:
+    def apply_styles(self) -> None:
         """Apply the distinct navy, gold, and glass-inspired kiosk theme."""
         self.setStyleSheet(
             """
@@ -239,8 +244,11 @@ class HomeScreen(QWidget):
             }
 
             QLabel#topic_icon_label {
-                color: #F6C85F;
-                font-size: 47px;
+                background-color: #F6C85F;
+                color: #10233A;
+                border-radius: 12px;
+                font-size: 15px;
+                font-weight: 800;
             }
 
             QLabel#topic_title_label {
@@ -252,12 +260,9 @@ class HomeScreen(QWidget):
             QLabel#topic_description_label {
                 color: #BFD0E0;
                 font-size: 15px;
-                line-height: 1.4;
             }
 
-            QPushButton#map_button,
-            QPushButton#chatbot_button,
-            QPushButton#university_info_button {
+            QPushButton[buttonRole="primary"] {
                 background-color: #F6C85F;
                 color: #10233A;
                 border: none;
@@ -267,15 +272,11 @@ class HomeScreen(QWidget):
                 font-weight: 800;
             }
 
-            QPushButton#map_button:hover,
-            QPushButton#chatbot_button:hover,
-            QPushButton#university_info_button:hover {
+            QPushButton[buttonRole="primary"]:hover {
                 background-color: #FFE092;
             }
 
-            QPushButton#map_button:pressed,
-            QPushButton#chatbot_button:pressed,
-            QPushButton#university_info_button:pressed {
+            QPushButton[buttonRole="primary"]:pressed {
                 background-color: #E5B84E;
             }
 
@@ -286,11 +287,7 @@ class HomeScreen(QWidget):
                 letter-spacing: 2px;
             }
 
-            QPushButton#faculties_quick_button,
-            QPushButton#professors_quick_button,
-            QPushButton#courses_quick_button,
-            QPushButton#events_quick_button,
-            QPushButton#faq_quick_button {
+            QPushButton[buttonRole="quick"] {
                 background-color: #153554;
                 color: #E9F1F8;
                 border: 1px solid #315371;
@@ -300,11 +297,7 @@ class HomeScreen(QWidget):
                 font-weight: 650;
             }
 
-            QPushButton#faculties_quick_button:hover,
-            QPushButton#professors_quick_button:hover,
-            QPushButton#courses_quick_button:hover,
-            QPushButton#events_quick_button:hover,
-            QPushButton#faq_quick_button:hover {
+            QPushButton[buttonRole="quick"]:hover {
                 background-color: #1C466D;
                 border-color: #F6C85F;
                 color: #FFFFFF;

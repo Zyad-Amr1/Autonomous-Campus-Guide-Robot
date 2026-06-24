@@ -7,6 +7,9 @@ from controllers.course_csv_controller import (
     EXPORT_COLUMNS, NEW_ONLY_COLUMNS, OPTIONAL_ID_COLUMNS,
     export_courses_to_csv, import_courses_from_csv, validate_courses_csv_headers,
 )
+from controllers.faculty_csv_controller import import_faculties_from_csv
+from controllers.professor_csv_controller import import_professors_from_csv
+from controllers.room_csv_controller import import_rooms_from_csv
 from database.init_db import initialize_database
 from database.repositories.course_repository import create_course, get_all_courses, get_course_by_id
 from database.repositories.faculty_repository import create_faculty
@@ -64,6 +67,62 @@ def test_import_courses_from_csv_creates_when_id_missing(tmp_path):
     assert import_courses_from_csv(path, db)["created"] == 1
 
 
+def test_course_import_uses_preserved_relationship_ids(tmp_path):
+    db = _db(tmp_path)
+    faculties = tmp_path / "faculties.csv"
+    rooms = tmp_path / "rooms.csv"
+    professors = tmp_path / "professors.csv"
+    courses = tmp_path / "courses.csv"
+    _write(
+        faculties,
+        ["id", "name", "description", "building", "dean_name"],
+        [[1, "Engineering", "Programs", "Building A", "Dean"]],
+    )
+    _write(
+        rooms,
+        [
+            "id", "room_name", "room_number", "building", "floor",
+            "category", "description", "x_coord", "y_coord",
+        ],
+        [[1, "Office", "A101", "Building A", 1, "Office", "", "", ""]],
+    )
+    _write(
+        professors,
+        [
+            "id", "full_name", "title", "faculty_id", "office_room_id",
+            "email", "phone", "office_hours", "photo_path", "bio",
+        ],
+        [[1, "Dr. Mona", "Professor", 1, 1, "", "", "", "", ""]],
+    )
+    course_row = _row(1)
+    course_row[3] = 1
+    course_row[4] = 1
+    _write(courses, NEW_ONLY_COLUMNS, [course_row])
+
+    import_faculties_from_csv(faculties, db)
+    import_rooms_from_csv(rooms, db)
+    import_professors_from_csv(professors, db)
+    summary = import_courses_from_csv(courses, db)
+
+    assert summary == {"created": 1, "updated": 0, "skipped": 0, "errors": []}
+    course = get_all_courses(db)[0]
+    assert course["faculty_id"] == 1
+    assert course["professor_id"] == 1
+    assert course["room_id"] == 1
+
+
+def test_import_courses_from_csv_preserves_explicit_id(tmp_path):
+    db = _db(tmp_path)
+    faculty = create_faculty("Engineering", db_path=db)
+    path = tmp_path / "courses.csv"
+    _write(path, OPTIONAL_ID_COLUMNS, [[10, *_row(faculty)]])
+
+    summary = import_courses_from_csv(path, db)
+
+    assert summary == {"created": 1, "updated": 0, "skipped": 0, "errors": []}
+    assert get_course_by_id(10, db) is not None
+
+
 def test_import_courses_from_csv_skips_invalid_required_rows(tmp_path):
     db = _db(tmp_path); faculty = create_faculty("Engineering", db_path=db); row = _row(faculty); row[0] = ""
     path = tmp_path / "courses.csv"; _write(path, NEW_ONLY_COLUMNS, [row]); summary = import_courses_from_csv(path, db)
@@ -74,6 +133,43 @@ def test_import_courses_from_csv_skips_invalid_numeric_rows(tmp_path):
     db = _db(tmp_path); row = _row("bad-id"); path = tmp_path / "courses.csv"; _write(path, NEW_ONLY_COLUMNS, [row])
     summary = import_courses_from_csv(path, db)
     assert summary["skipped"] == 1; assert "faculty_id" in summary["errors"][0]
+
+
+@pytest.mark.parametrize(
+    ("field_index", "field_name"),
+    [(3, "professor_id"), (4, "room_id")],
+)
+def test_import_courses_from_csv_skips_missing_optional_relationships(
+    tmp_path,
+    field_index,
+    field_name,
+):
+    db = _db(tmp_path)
+    faculty = create_faculty("Engineering", db_path=db)
+    row = _row(faculty)
+    row[field_index] = 9999
+    path = tmp_path / "courses.csv"
+    _write(path, NEW_ONLY_COLUMNS, [row])
+
+    summary = import_courses_from_csv(path, db)
+
+    assert summary["skipped"] == 1
+    assert summary["created"] == 0
+    assert f"{field_name} 9999 does not exist" in summary["errors"][0]
+    assert "FOREIGN KEY constraint failed" not in summary["errors"][0]
+
+
+def test_import_courses_from_csv_skips_missing_faculty(tmp_path):
+    db = _db(tmp_path)
+    path = tmp_path / "courses.csv"
+    _write(path, NEW_ONLY_COLUMNS, [_row(9999)])
+
+    summary = import_courses_from_csv(path, db)
+
+    assert summary["skipped"] == 1
+    assert summary["created"] == 0
+    assert "faculty_id 9999 does not exist" in summary["errors"][0]
+    assert "FOREIGN KEY constraint failed" not in summary["errors"][0]
 
 
 def test_export_courses_to_csv_writes_expected_columns_and_rows(tmp_path):

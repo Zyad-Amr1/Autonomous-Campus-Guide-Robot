@@ -4,6 +4,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
+from database.connection import get_connection
 from database.repositories.room_repository import (
     create_room,
     get_all_rooms,
@@ -24,6 +25,35 @@ NEW_ONLY_COLUMNS = [
 ]
 OPTIONAL_ID_COLUMNS = ["id", *NEW_ONLY_COLUMNS]
 EXPORT_COLUMNS = OPTIONAL_ID_COLUMNS.copy()
+
+
+def _insert_room_with_id(room_id: int, db_path, **room_data) -> None:
+    """Insert a room while preserving its CSV-provided identifier."""
+    connection = get_connection(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO rooms (
+                id, room_name, room_number, building, floor, category,
+                description, x_coord, y_coord
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                room_id,
+                room_data["room_name"],
+                room_data["room_number"],
+                room_data["building"],
+                room_data["floor"],
+                room_data["category"],
+                room_data["description"] or None,
+                room_data["x_coord"],
+                room_data["y_coord"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def validate_rooms_csv_headers(headers: list[str]) -> list[str]:
@@ -121,7 +151,7 @@ def import_rooms_from_csv(csv_path: str | Path, db_path) -> dict:
                     ):
                         summary["updated"] += 1
                     else:
-                        create_room(db_path=db_path, **room_data)
+                        _insert_room_with_id(room_id, db_path, **room_data)
                         summary["created"] += 1
                 else:
                     create_room(db_path=db_path, **room_data)

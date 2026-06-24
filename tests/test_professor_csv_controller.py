@@ -12,6 +12,8 @@ from controllers.professor_csv_controller import (
     import_professors_from_csv,
     validate_professors_csv_headers,
 )
+from controllers.faculty_csv_controller import import_faculties_from_csv
+from controllers.room_csv_controller import import_rooms_from_csv
 from database.init_db import initialize_database
 from database.repositories.faculty_repository import create_faculty
 from database.repositories.professor_repository import (
@@ -163,6 +165,52 @@ def test_import_professors_from_csv_creates_when_id_missing(tmp_path) -> None:
 
     assert summary["created"] == 1
     assert len(get_all_professors(db_path)) == 1
+
+
+def test_professor_import_uses_preserved_faculty_and_room_ids(tmp_path) -> None:
+    """Confirm related CSV imports preserve IDs used by professors."""
+    db_path = _create_temp_db(tmp_path)
+    faculties_path = tmp_path / "faculties.csv"
+    rooms_path = tmp_path / "rooms.csv"
+    professors_path = tmp_path / "professors.csv"
+    _write_csv(
+        faculties_path,
+        ["id", "name", "description", "building", "dean_name"],
+        [[1, "Engineering", "Programs", "Building A", "Dean"]],
+    )
+    _write_csv(
+        rooms_path,
+        [
+            "id", "room_name", "room_number", "building", "floor",
+            "category", "description", "x_coord", "y_coord",
+        ],
+        [[1, "Office", "A101", "Building A", 1, "Office", "", "", ""]],
+    )
+    _write_csv(professors_path, NEW_ONLY_COLUMNS, [_new_row(1, 1)])
+
+    import_faculties_from_csv(faculties_path, db_path)
+    import_rooms_from_csv(rooms_path, db_path)
+    summary = import_professors_from_csv(professors_path, db_path)
+
+    assert summary == {"created": 1, "updated": 0, "skipped": 0, "errors": []}
+    assert not any("faculty_id 1 does not exist" in error for error in summary["errors"])
+
+
+def test_import_professors_from_csv_preserves_explicit_id(tmp_path) -> None:
+    """Confirm a new professor keeps the identifier supplied by CSV."""
+    db_path = _create_temp_db(tmp_path)
+    faculty_id, room_id = _create_dependencies(db_path)
+    csv_path = tmp_path / "professors.csv"
+    _write_csv(
+        csv_path,
+        OPTIONAL_ID_COLUMNS,
+        [[5, *_new_row(faculty_id, room_id)]],
+    )
+
+    summary = import_professors_from_csv(csv_path, db_path)
+
+    assert summary == {"created": 1, "updated": 0, "skipped": 0, "errors": []}
+    assert get_professor_by_id(5, db_path) is not None
 
 
 def test_import_professors_from_csv_skips_empty_full_name_rows(tmp_path) -> None:

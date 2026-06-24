@@ -4,12 +4,16 @@ import csv
 import sqlite3
 from pathlib import Path
 
+from database.connection import get_connection
 from database.repositories.course_repository import (
     create_course,
     get_all_courses,
     get_course_by_id,
     update_course,
 )
+from database.repositories.faculty_repository import get_faculty_by_id
+from database.repositories.professor_repository import get_professor_by_id
+from database.repositories.room_repository import get_room_by_id
 
 REQUIRED_COLUMNS = {"course_code", "course_name", "faculty_id"}
 NEW_ONLY_COLUMNS = [
@@ -18,6 +22,47 @@ NEW_ONLY_COLUMNS = [
 ]
 OPTIONAL_ID_COLUMNS = ["id", *NEW_ONLY_COLUMNS]
 EXPORT_COLUMNS = OPTIONAL_ID_COLUMNS.copy()
+
+
+def _insert_course_with_id(course_id: int, db_path, **course_data) -> None:
+    """Insert a course while preserving its CSV-provided identifier."""
+    required_text = {
+        "course_code": "Course code",
+        "course_name": "Course name",
+        "schedule_day": "Schedule day",
+        "start_time": "Start time",
+        "end_time": "End time",
+    }
+    for field_name, display_name in required_text.items():
+        if not course_data[field_name]:
+            raise ValueError(f"{display_name} cannot be empty.")
+
+    connection = get_connection(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO courses (
+                id, course_code, course_name, faculty_id, professor_id,
+                room_id, schedule_day, start_time, end_time, semester
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                course_id,
+                course_data["course_code"],
+                course_data["course_name"],
+                course_data["faculty_id"],
+                course_data["professor_id"],
+                course_data["room_id"],
+                course_data["schedule_day"],
+                course_data["start_time"],
+                course_data["end_time"],
+                course_data["semester"] or None,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def validate_courses_csv_headers(headers: list[str]) -> list[str]:
@@ -85,6 +130,20 @@ def import_courses_from_csv(csv_path: str | Path, db_path) -> dict:
                     "end_time": row["end_time"],
                     "semester": row["semester"],
                 }
+                faculty_id = data["faculty_id"]
+                if get_faculty_by_id(faculty_id, db_path) is None:
+                    raise ValueError(f"faculty_id {faculty_id} does not exist")
+                professor_id = data["professor_id"]
+                if (
+                    professor_id is not None
+                    and get_professor_by_id(professor_id, db_path) is None
+                ):
+                    raise ValueError(
+                        f"professor_id {professor_id} does not exist"
+                    )
+                room_id = data["room_id"]
+                if room_id is not None and get_room_by_id(room_id, db_path) is None:
+                    raise ValueError(f"room_id {room_id} does not exist")
                 raw_id = row.get("id", "")
                 if raw_id:
                     course_id = _integer(raw_id, "id", True)
@@ -92,7 +151,7 @@ def import_courses_from_csv(csv_path: str | Path, db_path) -> dict:
                     if existing is not None and update_course(course_id, db_path=db_path, **data):
                         summary["updated"] += 1
                     else:
-                        create_course(db_path=db_path, **data)
+                        _insert_course_with_id(course_id, db_path, **data)
                         summary["created"] += 1
                 else:
                     create_course(db_path=db_path, **data)

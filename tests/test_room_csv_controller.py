@@ -15,6 +15,7 @@ from controllers.room_csv_controller import (
 from database.init_db import initialize_database
 from database.repositories.room_repository import (
     create_room,
+    delete_room,
     get_all_rooms,
     get_room_by_id,
 )
@@ -121,6 +122,27 @@ def test_import_rooms_from_csv_creates_when_id_missing(tmp_path) -> None:
 
     assert summary["created"] == 1
     assert len(get_all_rooms(db_path)) == 1
+
+
+def test_import_rooms_from_csv_preserves_explicit_id(tmp_path) -> None:
+    """Confirm a new room keeps the identifier supplied by CSV."""
+    db_path = _create_temp_db(tmp_path)
+    old_id = create_room(
+        "Temporary",
+        "T1",
+        "Temporary Building",
+        1,
+        "Office",
+        db_path=db_path,
+    )
+    delete_room(old_id, db_path)
+    csv_path = tmp_path / "rooms.csv"
+    _write_csv(csv_path, OPTIONAL_ID_COLUMNS, [[1, *_new_row()]])
+
+    summary = import_rooms_from_csv(csv_path, db_path)
+
+    assert summary == {"created": 1, "updated": 0, "skipped": 0, "errors": []}
+    assert get_room_by_id(1, db_path) is not None
 
 
 def test_import_rooms_from_csv_skips_missing_required_rows(tmp_path) -> None:

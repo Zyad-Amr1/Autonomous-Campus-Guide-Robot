@@ -4,6 +4,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
+from database.connection import get_connection
 from database.repositories.faculty_repository import (
     create_faculty,
     get_all_faculties,
@@ -24,6 +25,28 @@ EXPORT_COLUMNS = [
     "created_at",
     "updated_at",
 ]
+
+
+def _insert_faculty_with_id(faculty_id: int, db_path, **faculty_data) -> None:
+    """Insert a faculty while preserving its CSV-provided identifier."""
+    connection = get_connection(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO faculties (id, name, description, building, dean_name)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                faculty_id,
+                faculty_data["name"],
+                faculty_data["description"],
+                faculty_data["building"],
+                faculty_data["dean_name"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def validate_faculties_csv_headers(headers: list[str]) -> list[str]:
@@ -90,7 +113,11 @@ def import_faculties_from_csv(csv_path: str | Path, db_path) -> dict:
                     ):
                         summary["updated"] += 1
                     else:
-                        create_faculty(db_path=db_path, **faculty_data)
+                        _insert_faculty_with_id(
+                            faculty_id,
+                            db_path,
+                            **faculty_data,
+                        )
                         summary["created"] += 1
                 else:
                     create_faculty(db_path=db_path, **faculty_data)

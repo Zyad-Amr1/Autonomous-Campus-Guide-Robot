@@ -4,6 +4,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
+from database.connection import get_connection
 from database.repositories.faculty_repository import get_faculty_by_id
 from database.repositories.professor_repository import (
     create_professor,
@@ -27,6 +28,40 @@ NEW_ONLY_COLUMNS = [
 ]
 OPTIONAL_ID_COLUMNS = ["id", *NEW_ONLY_COLUMNS]
 EXPORT_COLUMNS = OPTIONAL_ID_COLUMNS.copy()
+
+
+def _insert_professor_with_id(
+    professor_id: int,
+    db_path,
+    **professor_data,
+) -> None:
+    """Insert a professor while preserving its CSV-provided identifier."""
+    connection = get_connection(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO professors (
+                id, full_name, title, faculty_id, office_room_id, email,
+                phone, office_hours, photo_path, bio
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                professor_id,
+                professor_data["full_name"],
+                professor_data["title"] or None,
+                professor_data["faculty_id"],
+                professor_data["office_room_id"],
+                professor_data["email"] or None,
+                professor_data["phone"] or None,
+                professor_data["office_hours"] or None,
+                professor_data["photo_path"] or None,
+                professor_data["bio"] or None,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def validate_professors_csv_headers(headers: list[str]) -> list[str]:
@@ -140,7 +175,11 @@ def import_professors_from_csv(csv_path: str | Path, db_path) -> dict:
                     ):
                         summary["updated"] += 1
                     else:
-                        create_professor(db_path=db_path, **professor_data)
+                        _insert_professor_with_id(
+                            professor_id,
+                            db_path,
+                            **professor_data,
+                        )
                         summary["created"] += 1
                 else:
                     create_professor(db_path=db_path, **professor_data)

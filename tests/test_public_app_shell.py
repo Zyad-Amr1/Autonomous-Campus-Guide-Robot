@@ -4,7 +4,13 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QLabel,
+    QPushButton,
+    QStackedWidget,
+)
 
 from ui.public.main_window import PublicMainWindow
 
@@ -45,7 +51,7 @@ def test_public_main_window_has_sidebar_and_content() -> None:
     try:
         assert application is not None
         assert window.findChild(QFrame, "public_shell_sidebar") is not None
-        assert window.findChild(QFrame, "public_shell_content") is not None
+        assert window.findChild(QStackedWidget, "public_page_stack") is not None
     finally:
         window.close()
 
@@ -79,8 +85,9 @@ def test_shell_title_and_subtitle_exist() -> None:
     window = PublicMainWindow()
     try:
         assert application is not None
-        assert window.findChild(QLabel, "public_shell_title") is not None
-        assert window.findChild(QLabel, "public_shell_subtitle") is not None
+        home_page = window.public_page_stack.widget(0)
+        assert home_page.findChild(QLabel, "placeholder_title_label") is not None
+        assert home_page.findChild(QLabel, "placeholder_subtitle_label") is not None
     finally:
         window.close()
 

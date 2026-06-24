@@ -1,9 +1,19 @@
-"""Future entry point for the ECU Robot Public Assistant application."""
+"""Desktop entry point for the ECU Robot Public Assistant."""
+
+import sys
+
+from PySide6.QtWidgets import QApplication
+
+from ui.public.main_window import PublicMainWindow
 
 
 def main() -> None:
-    """Run the temporary Public Assistant placeholder."""
-    print("ECU Robot Assistant placeholder")
+    """Start the standalone public robot dashboard."""
+    application = QApplication(sys.argv)
+    application.setApplicationName("ECU Robot Assistant")
+    window = PublicMainWindow()
+    window.show()
+    application.exec()
 
 
 if __name__ == "__main__":

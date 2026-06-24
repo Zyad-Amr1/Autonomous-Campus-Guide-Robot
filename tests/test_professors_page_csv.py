@@ -173,7 +173,11 @@ def test_professors_page_upload_csv_reports_missing_relationships(
         page.upload_csv()
         assert page.professors_table.rowCount() == 0
         assert "Skipped: 1" in messages[0]
-        assert "faculty_id or office_room_id does not exist" in messages[0]
+        assert (
+            "Some rows were skipped because their faculty_id or "
+            "office_room_id does not exist."
+        ) in messages[0]
+        assert "Recommended import order:" in messages[0]
         assert "faculties.csv → rooms.csv → professors.csv" in messages[0]
         assert "FOREIGN KEY constraint failed" not in messages[0]
     finally:

@@ -102,7 +102,24 @@ def test_import_professors_from_csv_creates_new_professors(tmp_path) -> None:
 
     assert summary["created"] == 1
     assert summary["updated"] == 0
+    assert summary["skipped"] == 0
+    assert summary["errors"] == []
     assert get_all_professors(db_path)[0]["full_name"] == "Dr. Mona Hassan"
+
+
+def test_import_professors_from_csv_allows_empty_office_room_id(tmp_path) -> None:
+    """Confirm office_room_id may be empty and is stored as null."""
+    db_path = _create_temp_db(tmp_path)
+    faculty_id, _ = _create_dependencies(db_path)
+    row = _new_row(faculty_id, "")
+    csv_path = tmp_path / "professors.csv"
+    _write_csv(csv_path, NEW_ONLY_COLUMNS, [row])
+
+    summary = import_professors_from_csv(csv_path, db_path)
+    professors = get_all_professors(db_path)
+
+    assert summary == {"created": 1, "updated": 0, "skipped": 0, "errors": []}
+    assert professors[0]["office_room_id"] is None
 
 
 def test_import_professors_from_csv_updates_existing_professor_when_id_exists(
@@ -196,6 +213,7 @@ def test_import_professors_skips_missing_faculty_with_clear_error(tmp_path) -> N
         "Row 2: faculty_id 9999 does not exist. "
         "Import faculties.csv first or use a valid faculty_id."
     ]
+    assert "FOREIGN KEY constraint failed" not in summary["errors"][0]
     assert get_all_professors(db_path) == []
 
 
@@ -214,6 +232,7 @@ def test_import_professors_skips_missing_room_with_clear_error(tmp_path) -> None
         "Row 2: office_room_id 9999 does not exist. "
         "Import rooms.csv first or leave office_room_id empty."
     ]
+    assert "FOREIGN KEY constraint failed" not in summary["errors"][0]
     assert get_all_professors(db_path) == []
 
 

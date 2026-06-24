@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
     APP_BACKGROUND_STYLE,
+    FLOATING_CHAT_BUTTON_STYLE,
     GOLD,
     NAVY,
     NAVY_DARK,
@@ -101,9 +102,9 @@ class PublicMainWindow(QMainWindow):
         shell_layout.setSpacing(0)
 
         sidebar = self._create_sidebar()
-        self.public_page_stack = self._create_page_stack()
+        content = self._create_content()
         shell_layout.addWidget(sidebar)
-        shell_layout.addWidget(self.public_page_stack, stretch=1)
+        shell_layout.addWidget(content, stretch=1)
 
     def _create_sidebar(self) -> QFrame:
         """Create and wire the touch-friendly public navigation rail."""
@@ -163,6 +164,49 @@ class PublicMainWindow(QMainWindow):
         footer.setStyleSheet(f"color: {OFF_WHITE}; font-size: 11px;")
         sidebar_layout.addWidget(footer)
         return sidebar
+
+    def _create_content(self) -> QFrame:
+        """Create the page stack and persistent bottom-right Ask Me action."""
+        content = QFrame()
+        content.setObjectName("public_shell_content")
+        content.setStyleSheet(
+            f"""
+            QFrame#public_shell_content {{
+                background-color: {NAVY_DARK};
+                border: none;
+            }}
+            """
+        )
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        self.public_page_stack = self._create_page_stack()
+        content_layout.addWidget(self.public_page_stack, stretch=1)
+
+        floating_row = QHBoxLayout()
+        floating_row.setContentsMargins(0, 0, 28, 24)
+        floating_row.addStretch()
+        self.floating_ask_button = QPushButton("💬 Ask me")
+        self.floating_ask_button.setObjectName("floating_ask_button")
+        self.floating_ask_button.setMinimumSize(150, TOUCH_BUTTON_HEIGHT)
+        self.floating_ask_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.floating_ask_button.setStyleSheet(
+            FLOATING_CHAT_BUTTON_STYLE
+            + """
+            QPushButton#floating_ask_button {
+                min-width: 150px;
+                max-width: 190px;
+                padding: 0 24px;
+            }
+            """
+        )
+        self.floating_ask_button.clicked.connect(
+            lambda checked=False: self.show_chat()
+        )
+        floating_row.addWidget(self.floating_ask_button)
+        content_layout.addLayout(floating_row)
+        return content
 
     def _create_page_stack(self) -> QStackedWidget:
         """Create exactly seven themed blank placeholder pages."""

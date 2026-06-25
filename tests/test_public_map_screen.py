@@ -37,6 +37,8 @@ def test_map_canvas_can_be_created() -> None:
         assert application is not None
         assert canvas.objectName() == "map_canvas"
         assert canvas.background_image_path is None
+        assert canvas.map_image_path is None
+        assert canvas.map_image_exists is False
     finally:
         canvas.close()
 
@@ -107,9 +109,13 @@ def test_map_canvas_supports_background_image_path(tmp_path) -> None:
         canvas.set_background_image(str(image_path))
         assert canvas.background_image_path == str(image_path)
         assert canvas.resolved_background_image_path == image_path
+        assert canvas.map_image_path == str(image_path)
+        assert canvas.map_image_exists is True
+        assert canvas._background_pixmap.isNull() is False
         canvas.set_background_image(str(tmp_path / "missing.png"))
         assert canvas.background_image_path == str(tmp_path / "missing.png")
         assert canvas.resolved_background_image_path == tmp_path / "missing.png"
+        assert canvas.map_image_exists is False
     finally:
         canvas.close()
 
@@ -123,6 +129,9 @@ def test_map_screen_resolves_default_image_path_from_project_root() -> None:
         assert screen.map_image_path == "assets/maps/ecu_campus_map.png"
         assert screen.map_canvas.background_image_path == "assets/maps/ecu_campus_map.png"
         assert screen.map_canvas.resolved_background_image_path == expected_path
+        assert screen.map_canvas.map_image_path.endswith("assets\\maps\\ecu_campus_map.png") or (
+            screen.map_canvas.map_image_path.endswith("assets/maps/ecu_campus_map.png")
+        )
     finally:
         screen.close()
 

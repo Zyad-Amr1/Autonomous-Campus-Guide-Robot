@@ -129,6 +129,15 @@ WALKING_GRAPH = {
 }
 
 
+def _project_root() -> Path:
+    """Return the repository root that contains the app's top-level folders."""
+    current_file = Path(__file__).resolve()
+    for folder in (current_file.parent, *current_file.parents):
+        if all((folder / name).exists() for name in ("apps", "ui", "database", "tests")):
+            return folder
+    return current_file.parents[3]
+
+
 class MapCanvas(QWidget):
     """Display the real ECU map image with route and hotspot overlays."""
 
@@ -140,6 +149,8 @@ class MapCanvas(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.background_image_path: str | None = None
         self.resolved_background_image_path: Path | None = None
+        self.map_image_path: str | None = None
+        self.map_image_exists = False
         self._background_pixmap = QPixmap()
         self.landmarks = LANDMARKS.copy()
         self.path_points = {**PATH_NODES, **self.landmarks}
@@ -159,11 +170,11 @@ class MapCanvas(QWidget):
         self.background_image_path = path
         image_path = Path(path)
         if not image_path.is_absolute():
-            image_path = Path(__file__).resolve().parents[3] / image_path
+            image_path = _project_root() / image_path
         self.resolved_background_image_path = image_path
-        self._background_pixmap = (
-            QPixmap(str(image_path)) if image_path.exists() else QPixmap()
-        )
+        self.map_image_path = str(image_path)
+        self.map_image_exists = image_path.exists()
+        self._background_pixmap = QPixmap(str(image_path)) if self.map_image_exists else QPixmap()
         self.update()
 
     def set_route(self, route: list[str], start: str, destination: str) -> None:
@@ -261,7 +272,7 @@ class MapCanvas(QWidget):
         painter.drawText(
             rect.adjusted(28, 28, -28, -28),
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Campus map image not found. Please add assets/maps/ecu_campus_map.png",
+            "Campus map image not found: assets/maps/ecu_campus_map.png",
         )
 
     def _draw_route(self, painter: QPainter) -> None:

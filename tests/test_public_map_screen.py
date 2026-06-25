@@ -52,6 +52,7 @@ def test_map_screen_required_widgets_exist() -> None:
             ("map_canvas", MapCanvas),
             ("map_info_panel", QWidget),
             ("map_info_title", QLabel),
+            ("map_info_details", QLabel),
         ):
             assert screen.findChild(widget_type, object_name) is not None
     finally:

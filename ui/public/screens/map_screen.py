@@ -34,6 +34,23 @@ from ui.public.theme import (
     font,
     px,
 )
+from database.connection import DB_NAME
+from database.repositories.room_repository import get_all_rooms
+
+
+CATEGORY_COLORS = {
+    "labs": "#2F80ED",
+    "laboratory": "#2F80ED",
+    "laboratories": "#2F80ED",
+    "offices": "#8E5CF7",
+    "office": "#8E5CF7",
+    "clinics": "#D94D45",
+    "clinic": "#D94D45",
+    "medical": "#D94D45",
+    "library": "#3BAA6B",
+    "cafeteria": "#E67E22",
+    "other": GOLD,
+}
 
 
 class MapCanvas(QWidget):
@@ -46,6 +63,10 @@ class MapCanvas(QWidget):
         self.setMinimumSize(620, 440)
         self.background_image_path: str | None = None
         self._background_pixmap = QPixmap()
+        self.markers: list[dict] = []
+        self.selected_marker: dict | None = None
+        self.marker_clicked = None
+        self._marker_hit_radius = 16
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -61,6 +82,17 @@ class MapCanvas(QWidget):
         )
         self.update()
 
+    def set_markers(self, rooms: list[dict]) -> None:
+        """Replace visible room markers with mappable room dictionaries."""
+        self.markers = [room for room in rooms if self._has_valid_coordinates(room)]
+        self.selected_marker = None
+        self.update()
+
+    def marker_color(self, category: str | None) -> str:
+        """Return the display color for one marker category."""
+        normalized = (category or "other").strip().lower()
+        return CATEGORY_COLORS.get(normalized, CATEGORY_COLORS["other"])
+
     def paintEvent(self, event) -> None:  # noqa: N802
         """Paint an illustrative campus map without loading real markers."""
         super().paintEvent(event)
@@ -73,13 +105,17 @@ class MapCanvas(QWidget):
         painter.drawRoundedRect(rect, 24, 24)
         if not self._background_pixmap.isNull():
             self._draw_background_image(painter, rect)
+            self._draw_room_markers(painter, QRectF(rect))
             return
 
         self._draw_landscape(painter, QRectF(rect))
         self._draw_roads(painter, QRectF(rect))
         self._draw_walkways(painter, QRectF(rect))
         self._draw_buildings(painter, QRectF(rect))
-        self._draw_markers(painter, QRectF(rect))
+        if self.markers:
+            self._draw_room_markers(painter, QRectF(rect))
+        else:
+            self._draw_placeholder_markers(painter, QRectF(rect))
 
     def _draw_background_image(self, painter: QPainter, rect) -> None:
         """Draw a real campus image scaled neatly inside the canvas."""
@@ -214,7 +250,7 @@ class MapCanvas(QWidget):
                 label,
             )
 
-    def _draw_markers(self, painter: QPainter, rect: QRectF) -> None:
+    def _draw_placeholder_markers(self, painter: QPainter, rect: QRectF) -> None:
         """Draw simple placeholder colored markers."""
         markers = (
             ("i", 0.20, 0.43, GOLD),
@@ -238,6 +274,76 @@ class MapCanvas(QWidget):
                 label,
             )
 
+    def _draw_room_markers(self, painter: QPainter, rect: QRectF) -> None:
+        """Draw database-backed room markers on the active map surface."""
+        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        for marker in self.markers:
+            center = self._marker_center(marker, rect)
+            is_selected = marker is self.selected_marker
+            radius = 18 if is_selected else 14
+            painter.setPen(QPen(QColor(WHITE), 4 if is_selected else 3))
+            painter.setBrush(QColor(self.marker_color(marker.get("category"))))
+            painter.drawEllipse(center, radius, radius)
+            painter.setPen(QColor(WHITE))
+            painter.drawText(
+                QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2),
+                Qt.AlignmentFlag.AlignCenter,
+                self._marker_initial(marker),
+            )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        """Select a room marker when a user taps near it."""
+        canvas_rect = QRectF(self.rect().adjusted(16, 16, -16, -16))
+        for marker in reversed(self.markers):
+            center = self._marker_center(marker, canvas_rect)
+            delta = center - event.position()
+            if (
+                delta.x() * delta.x() + delta.y() * delta.y()
+                <= self._marker_hit_radius * self._marker_hit_radius
+            ):
+                self.select_marker(marker)
+                return
+        super().mousePressEvent(event)
+
+    def select_marker(self, marker: dict) -> None:
+        """Set the active marker and notify the optional owner callback."""
+        self.selected_marker = marker
+        self.update()
+        if self.marker_clicked is not None:
+            self.marker_clicked(marker)
+
+    def _marker_center(self, marker: dict, rect: QRectF) -> QPointF:
+        """Translate normalized room coordinates into canvas coordinates."""
+        x_value = float(marker["x_coord"])
+        y_value = float(marker["y_coord"])
+        if x_value > 1 or y_value > 1:
+            x_value /= 100.0
+            y_value /= 100.0
+        x_value = min(max(x_value, 0.0), 1.0)
+        y_value = min(max(y_value, 0.0), 1.0)
+        return QPointF(
+            rect.left() + rect.width() * x_value,
+            rect.top() + rect.height() * y_value,
+        )
+
+    def _marker_initial(self, marker: dict) -> str:
+        """Return a compact marker label."""
+        room_name = str(marker.get("room_name") or marker.get("room_number") or "?")
+        return room_name[:1].upper()
+
+    def _has_valid_coordinates(self, room: dict) -> bool:
+        """Return whether a room has usable x/y marker coordinates."""
+        try:
+            if room.get("x_coord") is None or room.get("y_coord") is None:
+                return False
+            float(room["x_coord"])
+            float(room["y_coord"])
+            return True
+        except AttributeError:
+            return False
+        except (TypeError, ValueError):
+            return False
+
 
 class MapScreen(QWidget):
     """Display the public campus map search, filters, canvas, and info panel."""
@@ -252,13 +358,15 @@ class MapScreen(QWidget):
         ("Other", "filter_other_button"),
     )
 
-    def __init__(self) -> None:
+    def __init__(self, db_path=DB_NAME) -> None:
         """Create the map screen without touching real map data."""
         super().__init__()
+        self.db_path = db_path
         self.setObjectName("map_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
         self._apply_styles()
+        self.load_room_markers()
 
     def _build_ui(self) -> None:
         """Arrange the map header, controls, canvas, and info panel."""
@@ -305,6 +413,7 @@ class MapScreen(QWidget):
         body_layout = QHBoxLayout()
         body_layout.setSpacing(18)
         self.map_canvas = MapCanvas()
+        self.map_canvas.marker_clicked = self.update_selected_room
         body_layout.addWidget(self.map_canvas, stretch=3)
         body_layout.addWidget(self._create_info_panel(), stretch=1)
         page_layout.addLayout(body_layout, stretch=1)
@@ -322,15 +431,51 @@ class MapScreen(QWidget):
         eyebrow.setObjectName("map_info_eyebrow")
         self.map_info_title = QLabel("Select a place")
         self.map_info_title.setObjectName("map_info_title")
-        self.map_info_message = QLabel("Tap a marker on the map to view details.")
-        self.map_info_message.setObjectName("map_info_message")
-        self.map_info_message.setWordWrap(True)
+        self.map_info_details = QLabel("Tap a marker on the map to view details.")
+        self.map_info_details.setObjectName("map_info_details")
+        self.map_info_details.setWordWrap(True)
 
         panel_layout.addWidget(eyebrow)
         panel_layout.addWidget(self.map_info_title)
-        panel_layout.addWidget(self.map_info_message)
+        panel_layout.addWidget(self.map_info_details)
         panel_layout.addStretch()
         return self.map_info_panel
+
+    def load_room_markers(self) -> None:
+        """Load mappable room records from the configured database."""
+        try:
+            rooms = get_all_rooms(self.db_path)
+        except Exception:
+            self.map_canvas.set_markers([])
+            return
+        markers = [self._room_to_marker(room) for room in rooms]
+        self.map_canvas.set_markers(
+            [marker for marker in markers if marker is not None]
+        )
+
+    def update_selected_room(self, marker: dict) -> None:
+        """Update the right info panel with the selected room details."""
+        self.map_info_title.setText(str(marker.get("room_name") or "Selected room"))
+        details = (
+            f"Room number: {marker.get('room_number') or 'N/A'}\n"
+            f"Building: {marker.get('building') or 'N/A'}\n"
+            f"Floor: {marker.get('floor') if marker.get('floor') is not None else 'N/A'}\n"
+            f"Category: {marker.get('category') or 'Other'}\n\n"
+            f"{marker.get('description') or 'No description available yet.'}"
+        )
+        self.map_info_details.setText(details)
+
+    def _room_to_marker(self, room) -> dict | None:
+        """Convert a repository room row into a marker dictionary."""
+        marker = dict(room)
+        if marker.get("x_coord") is None or marker.get("y_coord") is None:
+            return None
+        try:
+            marker["x_coord"] = float(marker["x_coord"])
+            marker["y_coord"] = float(marker["y_coord"])
+        except (TypeError, ValueError):
+            return None
+        return marker
 
     def _apply_styles(self) -> None:
         """Apply ECU public dashboard styling to the map screen."""
@@ -407,7 +552,8 @@ class MapScreen(QWidget):
                 {font(24, 850)}
             }}
 
-            QLabel#map_info_message {{
+            QLabel#map_info_message,
+            QLabel#map_info_details {{
                 color: {TEXT_MUTED};
                 {font(15, 600)}
             }}

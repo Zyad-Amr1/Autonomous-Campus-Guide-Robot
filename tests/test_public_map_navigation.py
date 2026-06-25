@@ -38,6 +38,37 @@ def test_from_to_combo_boxes_exist() -> None:
         screen.close()
 
 
+def test_map_image_path_support_exists() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        assert screen.map_image_path == "assets/maps/ecu_campus_map.png"
+        assert screen.map_canvas.background_image_path == "assets/maps/ecu_campus_map.png"
+    finally:
+        screen.close()
+
+
+def test_from_to_combo_boxes_contain_landmarks() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        from_items = {
+            screen.map_from_combo.itemText(index)
+            for index in range(screen.map_from_combo.count())
+        }
+        to_items = {
+            screen.map_to_combo.itemText(index)
+            for index in range(screen.map_to_combo.count())
+        }
+        for landmark in ("Building A", "Building B", "Cafeteria", "Parking", "Stadium"):
+            assert landmark in from_items
+            assert landmark in to_items
+    finally:
+        screen.close()
+
+
 def test_route_buttons_exist() -> None:
     application = _get_application()
     screen = MapScreen()

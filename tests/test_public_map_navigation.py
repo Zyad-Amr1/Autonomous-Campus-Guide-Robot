@@ -216,6 +216,19 @@ def test_searching_cafeteria_selects_and_highlights_landmark() -> None:
         screen.close()
 
 
+def test_partial_search_selects_cafeteria() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_search_input.setText("caf")
+        screen.search_landmark()
+        assert screen.selected_landmark == "Cafeteria"
+        assert screen.map_canvas.selected_landmark == "Cafeteria"
+    finally:
+        screen.close()
+
+
 def test_selecting_marker_updates_selected_landmark() -> None:
     application = _get_application()
     screen = MapScreen()

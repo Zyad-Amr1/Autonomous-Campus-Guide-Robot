@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QPushButton, QWidget
 
 from ui.public.main_window import PublicMainWindow
 from ui.public.screens.map_screen import MapCanvas, MapScreen
@@ -49,11 +49,19 @@ def test_map_screen_required_widgets_exist() -> None:
             ("map_title", QLabel),
             ("map_subtitle", QLabel),
             ("map_canvas", MapCanvas),
+            ("map_search_input", QLineEdit),
+            ("map_search_button", QPushButton),
             ("map_from_combo", QComboBox),
             ("map_to_combo", QComboBox),
             ("map_find_route_button", QPushButton),
             ("map_reset_route_button", QPushButton),
+            ("map_start_walk_button", QPushButton),
+            ("map_pause_walk_button", QPushButton),
+            ("map_reset_walk_button", QPushButton),
+            ("map_selected_place_label", QLabel),
             ("map_route_info_label", QLabel),
+            ("map_route_steps_label", QLabel),
+            ("map_walk_status_label", QLabel),
             ("map_info_panel", QWidget),
         ):
             assert screen.findChild(widget_type, object_name) is not None

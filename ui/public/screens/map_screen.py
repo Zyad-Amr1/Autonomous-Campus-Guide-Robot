@@ -1,7 +1,9 @@
 """Public campus map screen with a professional placeholder canvas."""
 
+from pathlib import Path
+
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -42,11 +44,22 @@ class MapCanvas(QWidget):
         super().__init__()
         self.setObjectName("map_canvas")
         self.setMinimumSize(620, 440)
+        self.background_image_path: str | None = None
+        self._background_pixmap = QPixmap()
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def set_background_image(self, path: str) -> None:
+        """Set a future real campus image path and repaint the canvas."""
+        self.background_image_path = path
+        image_path = Path(path)
+        self._background_pixmap = (
+            QPixmap(str(image_path)) if image_path.exists() else QPixmap()
+        )
+        self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         """Paint an illustrative campus map without loading real markers."""
@@ -58,11 +71,31 @@ class MapCanvas(QWidget):
         painter.setPen(QPen(QColor("#D8D2C5"), 1))
         painter.setBrush(QColor("#ECE8DC"))
         painter.drawRoundedRect(rect, 24, 24)
+        if not self._background_pixmap.isNull():
+            self._draw_background_image(painter, rect)
+            return
 
         self._draw_landscape(painter, QRectF(rect))
+        self._draw_roads(painter, QRectF(rect))
         self._draw_walkways(painter, QRectF(rect))
         self._draw_buildings(painter, QRectF(rect))
         self._draw_markers(painter, QRectF(rect))
+
+    def _draw_background_image(self, painter: QPainter, rect) -> None:
+        """Draw a real campus image scaled neatly inside the canvas."""
+        scaled = self._background_pixmap.scaled(
+            rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        target_x = rect.x() + (rect.width() - scaled.width()) // 2
+        target_y = rect.y() + (rect.height() - scaled.height()) // 2
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(QRectF(rect), 24, 24)
+        painter.save()
+        painter.setClipPath(clip_path)
+        painter.drawPixmap(target_x, target_y, scaled)
+        painter.restore()
 
     def _draw_landscape(self, painter: QPainter, rect: QRectF) -> None:
         """Draw soft green zones and a central plaza."""
@@ -70,6 +103,19 @@ class MapCanvas(QWidget):
         painter.setBrush(QColor("#DCE7D6"))
         painter.drawEllipse(QRectF(rect.left() + 26, rect.top() + 34, 210, 135))
         painter.drawEllipse(QRectF(rect.right() - 236, rect.bottom() - 164, 210, 126))
+        painter.setBrush(QColor("#C8DDC2"))
+        for x, y in (
+            (0.18, 0.16),
+            (0.28, 0.78),
+            (0.64, 0.18),
+            (0.76, 0.55),
+            (0.88, 0.82),
+        ):
+            center = QPointF(
+                rect.left() + rect.width() * x,
+                rect.top() + rect.height() * y,
+            )
+            painter.drawEllipse(center, 14, 14)
 
         plaza = QRectF(
             rect.center().x() - 86,
@@ -81,6 +127,41 @@ class MapCanvas(QWidget):
         painter.drawRoundedRect(plaza, 28, 28)
         painter.setPen(QPen(QColor(GOLD), 2))
         painter.drawEllipse(plaza.adjusted(38, 18, -38, -18))
+
+    def _draw_roads(self, painter: QPainter, rect: QRectF) -> None:
+        """Draw soft road bands around the simulated campus blocks."""
+        painter.setPen(
+            QPen(
+                QColor("#C8C1B2"),
+                22,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        painter.drawLine(
+            QPointF(rect.left() + 34, rect.top() + 58),
+            QPointF(rect.right() - 34, rect.top() + 58),
+        )
+        painter.drawLine(
+            QPointF(rect.left() + 42, rect.bottom() - 58),
+            QPointF(rect.right() - 42, rect.bottom() - 58),
+        )
+        painter.setPen(
+            QPen(
+                QColor("#F6F2E8"),
+                4,
+                Qt.PenStyle.DashLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        painter.drawLine(
+            QPointF(rect.left() + 42, rect.top() + 58),
+            QPointF(rect.right() - 42, rect.top() + 58),
+        )
+        painter.drawLine(
+            QPointF(rect.left() + 50, rect.bottom() - 58),
+            QPointF(rect.right() - 50, rect.bottom() - 58),
+        )
 
     def _draw_walkways(self, painter: QPainter, rect: QRectF) -> None:
         """Draw light curved pedestrian paths through the campus."""

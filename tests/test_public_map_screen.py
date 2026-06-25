@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QWidget
 
 from ui.public.main_window import PublicMainWindow
@@ -26,6 +27,17 @@ def test_map_screen_can_be_created() -> None:
         assert screen.objectName() == "map_screen"
     finally:
         screen.close()
+
+
+def test_map_canvas_can_be_created() -> None:
+    application = _get_application()
+    canvas = MapCanvas()
+    try:
+        assert application is not None
+        assert canvas.objectName() == "map_canvas"
+        assert canvas.background_image_path is None
+    finally:
+        canvas.close()
 
 
 def test_map_screen_required_widgets_exist() -> None:
@@ -98,6 +110,24 @@ def test_public_main_window_map_page_is_map_screen() -> None:
         assert isinstance(window.public_page_stack.widget(1), MapScreen)
     finally:
         window.close()
+
+
+def test_map_canvas_supports_background_image_path(tmp_path) -> None:
+    application = _get_application()
+    canvas = MapCanvas()
+    image_path = tmp_path / "campus-map.png"
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(QColor("#0B2A52"))
+    pixmap.save(str(image_path))
+    try:
+        assert application is not None
+        assert canvas.background_image_path is None
+        canvas.set_background_image(str(image_path))
+        assert canvas.background_image_path == str(image_path)
+        canvas.set_background_image(str(tmp_path / "missing.png"))
+        assert canvas.background_image_path == str(tmp_path / "missing.png")
+    finally:
+        canvas.close()
 
 
 def test_show_map_switches_to_map_page() -> None:

@@ -49,6 +49,19 @@ def test_route_buttons_exist() -> None:
         screen.close()
 
 
+def test_walking_buttons_exist() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        assert screen.findChild(QPushButton, "map_start_walk_button") is not None
+        assert screen.findChild(QPushButton, "map_pause_walk_button") is not None
+        assert screen.findChild(QPushButton, "map_reset_walk_button") is not None
+        assert screen.findChild(QLabel, "map_walk_status_label") is not None
+    finally:
+        screen.close()
+
+
 def test_search_input_exists() -> None:
     application = _get_application()
     screen = MapScreen()
@@ -56,6 +69,93 @@ def test_search_input_exists() -> None:
         assert application is not None
         assert screen.findChild(QLineEdit, "map_search_input") is not None
         assert screen.findChild(QPushButton, "map_search_button") is not None
+    finally:
+        screen.close()
+
+
+def test_start_walk_without_route_shows_safe_message() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.start_walk()
+        assert screen.is_walking is False
+        assert screen.walk_timer.isActive() is False
+        assert screen.map_walk_status_label.text() == "Choose a route first."
+    finally:
+        screen.close()
+
+
+def test_start_walk_after_route_sets_walking_state() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        screen.start_walk()
+        assert screen.is_walking is True
+        assert screen.walk_timer.isActive() is True
+        assert screen.map_canvas.walking_progress == 0.0
+        assert screen.map_walk_status_label.text() == "Walking to Cafeteria..."
+    finally:
+        screen.pause_walk()
+        screen.close()
+
+
+def test_pause_walk_pauses_walking_state() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        screen.start_walk()
+        screen.pause_walk()
+        assert screen.is_walking is False
+        assert screen.walk_timer.isActive() is False
+        assert screen.map_walk_status_label.text() == "Walk paused."
+    finally:
+        screen.close()
+
+
+def test_reset_walk_resets_walking_progress() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        screen.start_walk()
+        screen._advance_walk()
+        assert screen.walking_progress > 0.0
+        screen.reset_walk()
+        assert screen.is_walking is False
+        assert screen.walking_progress == 0.0
+        assert screen.map_canvas.walking_progress == 0.0
+    finally:
+        screen.close()
+
+
+def test_walking_progress_reaches_destination_safely() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        screen.start_walk()
+        for _ in range(40):
+            screen._advance_walk()
+        assert screen.is_walking is False
+        assert screen.walk_timer.isActive() is False
+        assert screen.walking_progress == 1.0
+        assert screen.map_canvas.walking_progress == 1.0
+        assert screen.map_walk_status_label.text() == "Arrived at Cafeteria"
     finally:
         screen.close()
 
@@ -168,6 +268,7 @@ def test_reset_clears_current_route() -> None:
         assert screen.current_route == []
         assert screen.map_canvas.current_route == []
         assert screen.map_route_steps_label.text() == ""
+        assert screen.is_walking is False
     finally:
         screen.close()
 

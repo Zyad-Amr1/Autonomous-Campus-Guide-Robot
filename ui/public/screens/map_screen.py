@@ -3,7 +3,7 @@
 from heapq import heappop, heappush
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCompleter,
@@ -164,6 +164,7 @@ class MapCanvas(QWidget):
         self.current_route: list[str] = []
         self.route_start: str | None = None
         self.route_destination: str | None = None
+        self.walking_progress: float | None = None
         self.selected_landmark: str | None = None
         self.landmark_clicked = None
         self._image_target_rect = QRectF()
@@ -190,6 +191,7 @@ class MapCanvas(QWidget):
         self.current_route = route
         self.route_start = start
         self.route_destination = destination
+        self.walking_progress = None
         self.update()
 
     def clear_route(self) -> None:
@@ -197,6 +199,15 @@ class MapCanvas(QWidget):
         self.current_route = []
         self.route_start = None
         self.route_destination = None
+        self.walking_progress = None
+        self.update()
+
+    def set_walking_progress(self, progress: float | None) -> None:
+        """Set the animated walking dot position along the route."""
+        if progress is None:
+            self.walking_progress = None
+        else:
+            self.walking_progress = min(1.0, max(0.0, progress))
         self.update()
 
     def select_landmark(self, landmark: str) -> None:
@@ -230,6 +241,7 @@ class MapCanvas(QWidget):
 
         self._draw_route(painter)
         self._draw_landmarks(painter)
+        self._draw_walker(painter)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """Select a landmark when a user taps near its marker."""
@@ -336,6 +348,19 @@ class MapCanvas(QWidget):
                     name,
                 )
 
+    def _draw_walker(self, painter: QPainter) -> None:
+        """Draw the animated walking position on top of the route."""
+        if self.walking_progress is None or len(self.current_route) < 2:
+            return
+
+        position = self._point_for_route_progress(self.walking_progress)
+        painter.setPen(QPen(QColor(WHITE), 5))
+        painter.setBrush(QColor(NAVY_DARK))
+        painter.drawEllipse(position, 13, 13)
+        painter.setPen(QPen(QColor(GOLD), 3))
+        painter.setBrush(QColor(WHITE))
+        painter.drawEllipse(position, 7, 7)
+
     def _point_for_landmark(self, name: str) -> QPointF:
         """Convert 0-1000 normalized coordinates into canvas points."""
         x_value, y_value = self.landmarks[name]
@@ -344,6 +369,35 @@ class MapCanvas(QWidget):
             rect.left() + rect.width() * (x_value / 1000),
             rect.top() + rect.height() * (y_value / 1000),
         )
+
+    def _point_for_route_progress(self, progress: float) -> QPointF:
+        """Return the canvas point at a normalized progress along the route."""
+        route_points = [self._point_for_landmark(name) for name in self.current_route]
+        segment_lengths: list[float] = []
+        total_length = 0.0
+        for index in range(len(route_points) - 1):
+            first = route_points[index]
+            second = route_points[index + 1]
+            length = ((second.x() - first.x()) ** 2 + (second.y() - first.y()) ** 2) ** 0.5
+            segment_lengths.append(length)
+            total_length += length
+
+        if total_length <= 0:
+            return route_points[0]
+
+        target_length = total_length * min(1.0, max(0.0, progress))
+        traveled = 0.0
+        for index, segment_length in enumerate(segment_lengths):
+            if traveled + segment_length >= target_length:
+                segment_progress = (target_length - traveled) / segment_length
+                first = route_points[index]
+                second = route_points[index + 1]
+                return QPointF(
+                    first.x() + (second.x() - first.x()) * segment_progress,
+                    first.y() + (second.y() - first.y()) * segment_progress,
+                )
+            traveled += segment_length
+        return route_points[-1]
 
 
 class MapScreen(QWidget):
@@ -359,6 +413,11 @@ class MapScreen(QWidget):
         self.walking_graph = {key: tuple(value) for key, value in WALKING_GRAPH.items()}
         self.current_route: list[str] = []
         self.selected_landmark: str | None = None
+        self.walking_progress = 0.0
+        self.is_walking = False
+        self.walk_timer = QTimer(self)
+        self.walk_timer.setInterval(120)
+        self.walk_timer.timeout.connect(self._advance_walk)
         self.setObjectName("map_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
@@ -477,6 +536,31 @@ class MapScreen(QWidget):
         self.map_route_steps_label = QLabel("")
         self.map_route_steps_label.setObjectName("map_route_steps_label")
         self.map_route_steps_label.setWordWrap(True)
+        self.map_walk_status_label = QLabel("Choose a route to start walking.")
+        self.map_walk_status_label.setObjectName("map_walk_status_label")
+        self.map_walk_status_label.setWordWrap(True)
+
+        walk_buttons_layout = QHBoxLayout()
+        walk_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        walk_buttons_layout.setSpacing(8)
+        self.map_start_walk_button = QPushButton("Start Walk")
+        self.map_start_walk_button.setObjectName("map_start_walk_button")
+        self.map_pause_walk_button = QPushButton("Pause Walk")
+        self.map_pause_walk_button.setObjectName("map_pause_walk_button")
+        self.map_reset_walk_button = QPushButton("Reset Walk")
+        self.map_reset_walk_button.setObjectName("map_reset_walk_button")
+        for button in (
+            self.map_start_walk_button,
+            self.map_pause_walk_button,
+            self.map_reset_walk_button,
+        ):
+            button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            walk_buttons_layout.addWidget(button)
+
+        self.map_start_walk_button.clicked.connect(self.start_walk)
+        self.map_pause_walk_button.clicked.connect(self.pause_walk)
+        self.map_reset_walk_button.clicked.connect(self.reset_walk)
 
         panel_layout.addWidget(eyebrow)
         panel_layout.addWidget(self.map_info_title)
@@ -484,6 +568,8 @@ class MapScreen(QWidget):
         panel_layout.addWidget(self.map_selected_place_label)
         panel_layout.addWidget(self.map_set_destination_button)
         panel_layout.addWidget(self.map_route_steps_label)
+        panel_layout.addWidget(self.map_walk_status_label)
+        panel_layout.addLayout(walk_buttons_layout)
         panel_layout.addStretch()
         return self.map_info_panel
 
@@ -568,23 +654,30 @@ class MapScreen(QWidget):
         destination = self.map_to_combo.currentText()
         if start == destination:
             self.current_route = []
+            self._stop_walk()
             self.map_canvas.clear_route()
             self.map_info_title.setText("Same location selected")
             self.map_route_info_label.setText("Choose two different places to create a route.")
             self.map_route_steps_label.setText("")
+            self.map_walk_status_label.setText("Choose a route first.")
             return
 
         route = self.shortest_path(start, destination)
         if not route:
             self.current_route = []
+            self._stop_walk()
             self.map_canvas.clear_route()
             self.map_info_title.setText("No route found")
             self.map_route_info_label.setText("Try another start or destination.")
             self.map_route_steps_label.setText("")
+            self.map_walk_status_label.setText("Choose a route first.")
             return
 
         self.current_route = route
+        self._stop_walk()
+        self.walking_progress = 0.0
         self.map_canvas.set_route(route, start, destination)
+        self.map_canvas.set_walking_progress(0.0)
         minutes = max(1, round(self._route_distance(route) / 75))
         self.map_info_title.setText("Route ready")
         self.map_route_info_label.setText(
@@ -592,14 +685,70 @@ class MapScreen(QWidget):
             f"Estimated walking time: {minutes} min"
         )
         self.map_route_steps_label.setText("\n".join(self._route_steps(route)))
+        self.map_walk_status_label.setText(f"Ready to walk to {destination}.")
 
     def reset_route(self) -> None:
         """Clear the active walking route."""
         self.current_route = []
+        self._stop_walk()
+        self.walking_progress = 0.0
         self.map_canvas.clear_route()
         self.map_info_title.setText("Select a route")
         self.map_route_info_label.setText("Choose a start and destination, then tap Find Route.")
         self.map_route_steps_label.setText("")
+        self.map_walk_status_label.setText("Choose a route to start walking.")
+
+    def start_walk(self) -> None:
+        """Start or resume walking along the selected route."""
+        if len(self.current_route) < 2:
+            self._stop_walk()
+            self.map_canvas.set_walking_progress(None)
+            self.map_walk_status_label.setText("Choose a route first.")
+            return
+
+        if self.walking_progress >= 1.0:
+            self.walking_progress = 0.0
+            self.map_canvas.set_walking_progress(self.walking_progress)
+        self.is_walking = True
+        self.walk_timer.start()
+        self.map_walk_status_label.setText(f"Walking to {self.current_route[-1]}...")
+
+    def pause_walk(self) -> None:
+        """Pause the walking animation."""
+        self._stop_walk()
+        if self.current_route:
+            self.map_walk_status_label.setText("Walk paused.")
+
+    def reset_walk(self) -> None:
+        """Return the walking dot to the route start."""
+        self._stop_walk()
+        self.walking_progress = 0.0
+        if len(self.current_route) < 2:
+            self.map_canvas.set_walking_progress(None)
+            self.map_walk_status_label.setText("Choose a route first.")
+            return
+        self.map_canvas.set_walking_progress(0.0)
+        self.map_walk_status_label.setText(f"Ready at {self.current_route[0]}.")
+
+    def _stop_walk(self) -> None:
+        """Stop the walk timer and clear active walking state."""
+        self.walk_timer.stop()
+        self.is_walking = False
+
+    def _advance_walk(self) -> None:
+        """Advance the walking dot one animation step."""
+        if len(self.current_route) < 2:
+            self.reset_walk()
+            return
+
+        self.walking_progress = min(1.0, self.walking_progress + 0.035)
+        self.map_canvas.set_walking_progress(self.walking_progress)
+        destination = self.current_route[-1]
+        if self.walking_progress >= 1.0:
+            self._stop_walk()
+            self.map_walk_status_label.setText(f"Arrived at {destination}")
+        else:
+            self.map_walk_status_label.setText(f"Walking to {destination}...")
 
     def _handle_landmark_click(self, landmark: str) -> None:
         """Show clicked landmark context in the route info panel."""
@@ -740,6 +889,15 @@ class MapScreen(QWidget):
                 border-radius: {px(14)};
                 padding: {px(12)};
                 {font(14, 700)}
+            }}
+
+            QLabel#map_walk_status_label {{
+                color: {NAVY_DARK};
+                background-color: {WHITE};
+                border: 1px solid rgba(215, 169, 75, 90);
+                border-radius: {px(14)};
+                padding: {px(10)};
+                {font(14, 800)}
             }}
             """
         )

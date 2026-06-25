@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.public.screens.admin_gate_screen import AdminGateScreen
 from ui.public.screens.home_screen import HomeScreen
 from ui.public.screens.map_screen import MapScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
@@ -43,6 +44,7 @@ class PublicMainWindow(QMainWindow):
         ("news", "sidebar_news_button"),
         ("about", "sidebar_about_button"),
         ("chat", "sidebar_chat_button"),
+        ("data", "sidebar_data_button"),
     )
 
     _PLACEHOLDER_PAGES = (
@@ -241,6 +243,8 @@ class PublicMainWindow(QMainWindow):
             page = PlaceholderPage("", "", icon)
             self.placeholder_pages[key] = page
             page_stack.addWidget(page)
+        self.admin_gate_screen = AdminGateScreen()
+        page_stack.addWidget(self.admin_gate_screen)
         return page_stack
 
     def toggle_language(self) -> None:
@@ -264,6 +268,7 @@ class PublicMainWindow(QMainWindow):
         self.public_page_stack.setLayoutDirection(direction)
         self.home_screen.setLayoutDirection(direction)
         self.map_screen.setLayoutDirection(direction)
+        self.admin_gate_screen.setLayoutDirection(direction)
         self.setWindowTitle(translations["app_title"].replace("\n", " "))
         self.app_title_label.setText(translations["app_title"])
         self.app_subtitle_label.setText(translations["app_subtitle"])
@@ -273,7 +278,7 @@ class PublicMainWindow(QMainWindow):
         self.emergency_help_button.setLayoutDirection(direction)
 
         for key, button in self.sidebar_buttons.items():
-            button.setText(translations[key])
+            button.setText(translations.get(key, "🔐 Data"))
             button.setLayoutDirection(direction)
             button.setStyleSheet(
                 SIDEBAR_BUTTON_STYLE.replace(
@@ -351,3 +356,7 @@ class PublicMainWindow(QMainWindow):
     def show_chat(self) -> None:
         """Show the Chat Assistant placeholder."""
         self._show_page(6, "chat")
+
+    def show_data(self) -> None:
+        """Show the protected public data access gate."""
+        self._show_page(7, "data")

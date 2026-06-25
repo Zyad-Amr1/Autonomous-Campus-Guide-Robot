@@ -111,3 +111,9 @@ class PlaceholderPage(QWidget):
 
         page_layout.addWidget(card)
         page_layout.addStretch()
+
+    def update_text(self, title: str, subtitle: str, message: str) -> None:
+        """Refresh visible placeholder copy after a language change."""
+        self.placeholder_title_label.setText(title)
+        self.placeholder_subtitle_label.setText(subtitle)
+        self.placeholder_message_label.setText(message)

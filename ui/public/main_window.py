@@ -25,63 +25,42 @@ from ui.public.theme import (
     SIDEBAR_WIDTH,
     TOUCH_BUTTON_HEIGHT,
 )
+from ui.public.translations import TRANSLATIONS
 
 
 class PublicMainWindow(QMainWindow):
     """Display seven lightweight public placeholders with sidebar navigation."""
 
     _SIDEBAR_ITEMS = (
-        ("home", "⌂  Home", "sidebar_home_button"),
-        ("map", "◇  Map", "sidebar_map_button"),
-        ("staff", "♟  Staff", "sidebar_staff_button"),
-        ("schedule", "▤  Schedule", "sidebar_schedule_button"),
-        ("news", "◆  News", "sidebar_news_button"),
-        ("about", "ⓘ  About", "sidebar_about_button"),
-        ("chat", "◉  Chat", "sidebar_chat_button"),
+        ("home", "sidebar_home_button"),
+        ("map", "sidebar_map_button"),
+        ("staff", "sidebar_staff_button"),
+        ("schedule", "sidebar_schedule_button"),
+        ("news", "sidebar_news_button"),
+        ("about", "sidebar_about_button"),
+        ("chat", "sidebar_chat_button"),
     )
 
     _PLACEHOLDER_PAGES = (
-        ("Home", "Welcome to ECU Smart Assistant.", "⌂"),
-        (
-            "Campus Map",
-            "Interactive room and building navigation will be connected here.",
-            "◇",
-        ),
-        (
-            "Staff Directory",
-            "Professor and office search will be connected here.",
-            "♟",
-        ),
-        (
-            "Today's Schedule",
-            "Course schedules and room details will be connected here.",
-            "▤",
-        ),
-        (
-            "Events & News",
-            "Campus events and important dates will be connected here.",
-            "◆",
-        ),
-        (
-            "About ECU",
-            "University information and faculties will be connected here.",
-            "ⓘ",
-        ),
-        (
-            "Chat Assistant",
-            "The ECU question-answer chatbot will be connected here.",
-            "◉",
-        ),
+        ("home", "HOME"),
+        ("map", "MAP"),
+        ("staff", "STAFF"),
+        ("schedule", "TIME"),
+        ("news", "NEWS"),
+        ("about", "INFO"),
+        ("chat", "CHAT"),
     )
 
     def __init__(self) -> None:
         """Create the sidebar and seven-page placeholder stack."""
         super().__init__()
-        self.setWindowTitle("ECU Smart Assistant")
+        self.current_language = "en"
         self.setObjectName("public_main_window")
         self.setMinimumSize(1280, 800)
         self.sidebar_buttons: dict[str, QPushButton] = {}
+        self.placeholder_pages: dict[str, PlaceholderPage] = {}
         self._build_ui()
+        self.apply_language()
         self.show_home()
 
     def _build_ui(self) -> None:
@@ -124,24 +103,24 @@ class PublicMainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(22, 34, 22, 28)
         sidebar_layout.setSpacing(12)
 
-        app_title = QLabel("ECU Smart\nAssistant")
-        app_title.setObjectName("public_sidebar_title")
-        app_title.setStyleSheet(
+        self.app_title_label = QLabel()
+        self.app_title_label.setObjectName("public_sidebar_title")
+        self.app_title_label.setStyleSheet(
             f"color: {GOLD}; font-size: 25px; font-weight: 800;"
         )
-        app_subtitle = QLabel("Public Robot Guide")
-        app_subtitle.setObjectName("public_sidebar_subtitle")
-        app_subtitle.setStyleSheet(
+        self.app_subtitle_label = QLabel()
+        self.app_subtitle_label.setObjectName("public_sidebar_subtitle")
+        self.app_subtitle_label.setStyleSheet(
             f"color: {OFF_WHITE}; font-size: 13px; font-weight: 600;"
         )
-        sidebar_layout.addWidget(app_title)
-        sidebar_layout.addWidget(app_subtitle)
+        sidebar_layout.addWidget(self.app_title_label)
+        sidebar_layout.addWidget(self.app_subtitle_label)
         sidebar_layout.addSpacing(24)
 
         self.nav_button_group = QButtonGroup(self)
         self.nav_button_group.setExclusive(True)
-        for index, (key, label, object_name) in enumerate(self._SIDEBAR_ITEMS):
-            button = QPushButton(label)
+        for index, (key, object_name) in enumerate(self._SIDEBAR_ITEMS):
+            button = QPushButton()
             button.setObjectName(object_name)
             button.setCheckable(True)
             button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
@@ -155,6 +134,16 @@ class PublicMainWindow(QMainWindow):
             self.sidebar_buttons[key] = button
             setattr(self, object_name, button)
             sidebar_layout.addWidget(button)
+
+        self.language_toggle_button = QPushButton()
+        self.language_toggle_button.setObjectName("language_toggle_button")
+        self.language_toggle_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.language_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.language_toggle_button.setStyleSheet(SIDEBAR_BUTTON_STYLE)
+        self.language_toggle_button.clicked.connect(
+            lambda checked=False: self.toggle_language()
+        )
+        sidebar_layout.addWidget(self.language_toggle_button)
 
         sidebar_layout.addStretch()
         footer = QLabel("Egyptian Chinese University")
@@ -187,7 +176,7 @@ class PublicMainWindow(QMainWindow):
         floating_row = QHBoxLayout()
         floating_row.setContentsMargins(0, 0, 28, 24)
         floating_row.addStretch()
-        self.floating_ask_button = QPushButton("💬 Ask me")
+        self.floating_ask_button = QPushButton()
         self.floating_ask_button.setObjectName("floating_ask_button")
         self.floating_ask_button.setMinimumSize(150, TOUCH_BUTTON_HEIGHT)
         self.floating_ask_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -220,9 +209,63 @@ class PublicMainWindow(QMainWindow):
             }}
             """
         )
-        for title, subtitle, icon in self._PLACEHOLDER_PAGES:
-            page_stack.addWidget(PlaceholderPage(title, subtitle, icon))
+        for key, icon in self._PLACEHOLDER_PAGES:
+            page = PlaceholderPage("", "", icon)
+            self.placeholder_pages[key] = page
+            page_stack.addWidget(page)
         return page_stack
+
+    def toggle_language(self) -> None:
+        """Switch between English and Arabic public dashboard copy."""
+        self.current_language = "ar" if self.current_language == "en" else "en"
+        self.apply_language()
+
+    def apply_language(self) -> None:
+        """Apply the current language to visible text and layout direction."""
+        translations = TRANSLATIONS[self.current_language]
+        is_arabic = self.current_language == "ar"
+        direction = (
+            Qt.LayoutDirection.RightToLeft
+            if is_arabic
+            else Qt.LayoutDirection.LeftToRight
+        )
+        sidebar_alignment = "right" if is_arabic else "left"
+
+        self.setLayoutDirection(direction)
+        self.centralWidget().setLayoutDirection(direction)
+        self.public_page_stack.setLayoutDirection(direction)
+        self.setWindowTitle(translations["app_title"].replace("\n", " "))
+        self.app_title_label.setText(translations["app_title"])
+        self.app_subtitle_label.setText(translations["app_subtitle"])
+        self.language_toggle_button.setText(translations["language_toggle"])
+        self.floating_ask_button.setText(translations["ask_me"])
+        self.floating_ask_button.setLayoutDirection(direction)
+
+        for key, button in self.sidebar_buttons.items():
+            button.setText(translations[key])
+            button.setLayoutDirection(direction)
+            button.setStyleSheet(
+                SIDEBAR_BUTTON_STYLE.replace(
+                    "text-align: left;",
+                    f"text-align: {sidebar_alignment};",
+                )
+            )
+
+        self.language_toggle_button.setLayoutDirection(direction)
+        self.language_toggle_button.setStyleSheet(
+            SIDEBAR_BUTTON_STYLE.replace(
+                "text-align: left;",
+                f"text-align: {sidebar_alignment};",
+            )
+        )
+
+        for key, page in self.placeholder_pages.items():
+            page.setLayoutDirection(direction)
+            page.update_text(
+                translations[f"placeholder_{key}_title"],
+                translations[f"placeholder_{key}_subtitle"],
+                translations["placeholder_message"],
+            )
 
     def set_active_nav(self, key: str) -> None:
         """Mark one visual sidebar item as the active section."""

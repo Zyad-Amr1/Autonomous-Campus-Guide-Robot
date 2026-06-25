@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.public.screens.admin_gate_screen import AdminGateScreen
+from ui.public.screens.data_dashboard_screen import DataDashboardScreen
 from ui.public.screens.home_screen import HomeScreen
 from ui.public.screens.map_screen import MapScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
@@ -243,8 +244,10 @@ class PublicMainWindow(QMainWindow):
             page = PlaceholderPage("", "", icon)
             self.placeholder_pages[key] = page
             page_stack.addWidget(page)
-        self.admin_gate_screen = AdminGateScreen()
+        self.admin_gate_screen = AdminGateScreen(self)
         page_stack.addWidget(self.admin_gate_screen)
+        self.data_dashboard_screen = DataDashboardScreen()
+        page_stack.addWidget(self.data_dashboard_screen)
         return page_stack
 
     def toggle_language(self) -> None:
@@ -269,6 +272,7 @@ class PublicMainWindow(QMainWindow):
         self.home_screen.setLayoutDirection(direction)
         self.map_screen.setLayoutDirection(direction)
         self.admin_gate_screen.setLayoutDirection(direction)
+        self.data_dashboard_screen.setLayoutDirection(direction)
         self.setWindowTitle(translations["app_title"].replace("\n", " "))
         self.app_title_label.setText(translations["app_title"])
         self.app_subtitle_label.setText(translations["app_subtitle"])
@@ -360,3 +364,7 @@ class PublicMainWindow(QMainWindow):
     def show_data(self) -> None:
         """Show the protected public data access gate."""
         self._show_page(7, "data")
+
+    def show_data_dashboard(self) -> None:
+        """Show the protected data dashboard inside the public app."""
+        self._show_page(8, "data")

@@ -33,9 +33,10 @@ class AdminGateScreen(QWidget):
 
     ADMIN_PASSWORD = "admin123"
 
-    def __init__(self) -> None:
+    def __init__(self, parent_window=None) -> None:
         """Build the public-themed protected access screen."""
         super().__init__()
+        self.parent_window = parent_window
         self.setObjectName("admin_gate_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
@@ -99,8 +100,10 @@ class AdminGateScreen(QWidget):
         """Check the temporary gate password and update status text."""
         if self.admin_password_input.text() == self.ADMIN_PASSWORD:
             self.admin_gate_status_label.setText(
-                "Access granted. Data dashboard will be connected here."
+                "Access granted. Opening data dashboard."
             )
+            if self.parent_window is not None:
+                self.parent_window.show_data_dashboard()
             return
         self.admin_gate_status_label.setText("Incorrect password. Please try again.")
 

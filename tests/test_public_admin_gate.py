@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 
 from ui.public.main_window import PublicMainWindow
 from ui.public.screens.admin_gate_screen import AdminGateScreen
+from ui.public.screens.data_dashboard_screen import DataDashboardScreen
 
 
 def _get_application() -> QApplication:
@@ -82,8 +83,9 @@ def test_correct_password_shows_access_granted() -> None:
         window.admin_gate_screen.admin_unlock_button.click()
         assert (
             window.admin_gate_screen.admin_gate_status_label.text()
-            == "Access granted. Data dashboard will be connected here."
+            == "Access granted. Opening data dashboard."
         )
+        assert isinstance(window.public_page_stack.currentWidget(), DataDashboardScreen)
     finally:
         window.close()
 

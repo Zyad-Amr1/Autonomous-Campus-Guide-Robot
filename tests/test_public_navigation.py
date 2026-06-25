@@ -25,7 +25,7 @@ def test_public_main_window_has_page_stack() -> None:
         assert application is not None
         stack = window.findChild(QStackedWidget, "public_page_stack")
         assert stack is not None
-        assert stack.count() == 8
+        assert stack.count() == 9
     finally:
         window.close()
 

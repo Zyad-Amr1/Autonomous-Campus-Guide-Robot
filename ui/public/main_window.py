@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
     APP_BACKGROUND_STYLE,
+    EMERGENCY_BUTTON_STYLE,
     FLOATING_CHAT_BUTTON_STYLE,
     GOLD,
     NAVY,
@@ -155,7 +157,7 @@ class PublicMainWindow(QMainWindow):
         return sidebar
 
     def _create_content(self) -> QFrame:
-        """Create the page stack and persistent bottom-right Ask Me action."""
+        """Create the page stack and persistent floating actions."""
         content = QFrame()
         content.setObjectName("public_shell_content")
         content.setStyleSheet(
@@ -175,7 +177,27 @@ class PublicMainWindow(QMainWindow):
 
         floating_row = QHBoxLayout()
         floating_row.setContentsMargins(0, 0, 28, 24)
+        floating_row.setSpacing(12)
         floating_row.addStretch()
+        self.emergency_help_button = QPushButton("🚨 Help")
+        self.emergency_help_button.setObjectName("emergency_help_button")
+        self.emergency_help_button.setMinimumSize(120, TOUCH_BUTTON_HEIGHT)
+        self.emergency_help_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.emergency_help_button.setStyleSheet(
+            EMERGENCY_BUTTON_STYLE
+            + """
+            QPushButton#emergency_help_button {
+                min-width: 120px;
+                max-width: 160px;
+                padding: 0 20px;
+            }
+            """
+        )
+        self.emergency_help_button.clicked.connect(
+            lambda checked=False: self.show_emergency_help()
+        )
+        floating_row.addWidget(self.emergency_help_button)
+
         self.floating_ask_button = QPushButton()
         self.floating_ask_button.setObjectName("floating_ask_button")
         self.floating_ask_button.setMinimumSize(150, TOUCH_BUTTON_HEIGHT)
@@ -240,6 +262,7 @@ class PublicMainWindow(QMainWindow):
         self.language_toggle_button.setText(translations["language_toggle"])
         self.floating_ask_button.setText(translations["ask_me"])
         self.floating_ask_button.setLayoutDirection(direction)
+        self.emergency_help_button.setLayoutDirection(direction)
 
         for key, button in self.sidebar_buttons.items():
             button.setText(translations[key])
@@ -266,6 +289,16 @@ class PublicMainWindow(QMainWindow):
                 translations[f"placeholder_{key}_subtitle"],
                 translations["placeholder_message"],
             )
+
+    def show_emergency_help(self) -> None:
+        """Show hardcoded emergency contact information for public users."""
+        message = (
+            "Campus Security: 0000\n"
+            "First Aid / Medical Help: 0000\n"
+            "Student Affairs: 0000\n\n"
+            "Please contact the nearest staff member in urgent situations."
+        )
+        QMessageBox.information(self, "Emergency Help", message)
 
     def set_active_nav(self, key: str) -> None:
         """Mark one visual sidebar item as the active section."""

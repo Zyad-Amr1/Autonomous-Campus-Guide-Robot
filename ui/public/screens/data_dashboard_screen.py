@@ -63,12 +63,14 @@ from database.repositories.room_repository import (
     update_room,
 )
 from ui.public.theme import (
+    BORDER,
     CARD_PADDING,
     CARD_RADIUS,
-    GOLD,
+    CHARCOAL,
+    ECU_RED,
+    ECU_RED_DARK,
     GOLD_LIGHT,
-    NAVY,
-    NAVY_LIGHT,
+    LIGHT_GRAY,
     OFF_WHITE,
     PAGE_PADDING,
     TEXT_DARK,
@@ -495,7 +497,7 @@ class DataDashboardScreen(QWidget):
             }}
 
             QLabel#data_dashboard_title {{
-                color: {NAVY};
+                color: {CHARCOAL};
                 {font(32, 850)}
             }}
 
@@ -507,14 +509,14 @@ class DataDashboardScreen(QWidget):
 
             QFrame#data_toolbar {{
                 background-color: {WHITE};
-                border: 1px solid rgba(92, 107, 128, 70);
+                border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS)};
             }}
 
             QComboBox#data_dataset_selector {{
-                background-color: {OFF_WHITE};
+                background-color: {WHITE};
                 color: {TEXT_DARK};
-                border: 1px solid rgba(92, 107, 128, 80);
+                border: 1px solid {BORDER};
                 border-radius: {px(16)};
                 padding: 0 {px(CARD_PADDING)};
                 min-height: {px(TOUCH_BUTTON_HEIGHT)};
@@ -522,7 +524,7 @@ class DataDashboardScreen(QWidget):
             }}
 
             QPushButton {{
-                background-color: {NAVY};
+                background-color: {ECU_RED};
                 color: {WHITE};
                 border: none;
                 border-radius: {px(16)};
@@ -531,7 +533,7 @@ class DataDashboardScreen(QWidget):
             }}
 
             QPushButton:hover {{
-                background-color: {NAVY_LIGHT};
+                background-color: {ECU_RED_DARK};
             }}
 
             QPushButton:pressed {{
@@ -541,18 +543,18 @@ class DataDashboardScreen(QWidget):
 
             QTableWidget#data_table {{
                 background-color: {WHITE};
-                alternate-background-color: #F1EEE7;
+                alternate-background-color: {LIGHT_GRAY};
                 color: {TEXT_DARK};
-                gridline-color: rgba(92, 107, 128, 80);
-                border: 1px solid rgba(92, 107, 128, 70);
+                gridline-color: {BORDER};
+                border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS)};
-                selection-background-color: {GOLD};
+                selection-background-color: {GOLD_LIGHT};
                 selection-color: {TEXT_DARK};
                 {font(14, 550)}
             }}
 
             QHeaderView::section {{
-                background-color: {NAVY};
+                background-color: {CHARCOAL};
                 color: {WHITE};
                 border: none;
                 padding: 10px;

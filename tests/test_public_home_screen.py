@@ -36,7 +36,7 @@ def test_home_screen_has_required_object_names() -> None:
         assert screen.home_welcome_title.text() == "Welcome to ECU Smart Assistant"
         assert (
             screen.home_welcome_subtitle.text()
-            == "Choose what you need from the robot guide."
+            == "Find your way, ask questions, and explore university information."
         )
         for object_name, widget_type in (
             ("home_welcome_title", QLabel),

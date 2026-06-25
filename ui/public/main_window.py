@@ -21,15 +21,16 @@ from ui.public.screens.map_screen import MapScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
     APP_BACKGROUND_STYLE,
+    BORDER,
     EMERGENCY_BUTTON_STYLE,
     FLOATING_CHAT_BUTTON_STYLE,
-    GOLD,
-    NAVY,
-    NAVY_DARK,
     OFF_WHITE,
     SIDEBAR_BUTTON_STYLE,
+    SIDEBAR_STYLE,
     SIDEBAR_WIDTH,
     TOUCH_BUTTON_HEIGHT,
+    WHITE,
+    font,
 )
 from ui.public.translations import TRANSLATIONS
 
@@ -97,31 +98,26 @@ class PublicMainWindow(QMainWindow):
         sidebar.setObjectName("public_shell_sidebar")
         sidebar.setFixedWidth(SIDEBAR_WIDTH)
         sidebar.setStyleSheet(
-            f"""
-            QFrame#public_shell_sidebar {{
-                background-color: {NAVY};
-                border: none;
-            }}
-            """
+            SIDEBAR_STYLE.replace("QFrame {", "QFrame#public_shell_sidebar {", 1)
         )
 
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(22, 34, 22, 28)
-        sidebar_layout.setSpacing(12)
+        sidebar_layout.setContentsMargins(14, 28, 14, 24)
+        sidebar_layout.setSpacing(10)
 
         self.app_title_label = QLabel()
         self.app_title_label.setObjectName("public_sidebar_title")
         self.app_title_label.setStyleSheet(
-            f"color: {GOLD}; font-size: 25px; font-weight: 800;"
+            f"color: {WHITE}; {font(20, 900)}"
         )
         self.app_subtitle_label = QLabel()
         self.app_subtitle_label.setObjectName("public_sidebar_subtitle")
         self.app_subtitle_label.setStyleSheet(
-            f"color: {OFF_WHITE}; font-size: 13px; font-weight: 600;"
+            f"color: #D1D5DB; {font(12, 650)}"
         )
         sidebar_layout.addWidget(self.app_title_label)
         sidebar_layout.addWidget(self.app_subtitle_label)
-        sidebar_layout.addSpacing(24)
+        sidebar_layout.addSpacing(20)
 
         self.nav_button_group = QButtonGroup(self)
         self.nav_button_group.setExclusive(True)
@@ -156,7 +152,7 @@ class PublicMainWindow(QMainWindow):
         footer.setObjectName("public_sidebar_footer")
         footer.setWordWrap(True)
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setStyleSheet(f"color: {OFF_WHITE}; font-size: 11px;")
+        footer.setStyleSheet(f"color: #9CA3AF; {font(11, 650)}")
         sidebar_layout.addWidget(footer)
         return sidebar
 
@@ -168,7 +164,7 @@ class PublicMainWindow(QMainWindow):
             f"""
             QFrame#public_shell_content {{
                 background-color: {OFF_WHITE};
-                border: none;
+                border-left: 1px solid {BORDER};
             }}
             """
         )
@@ -180,10 +176,10 @@ class PublicMainWindow(QMainWindow):
         content_layout.addWidget(self.public_page_stack, stretch=1)
 
         floating_row = QHBoxLayout()
-        floating_row.setContentsMargins(0, 0, 28, 24)
+        floating_row.setContentsMargins(0, 0, 28, 22)
         floating_row.setSpacing(12)
         floating_row.addStretch()
-        self.emergency_help_button = QPushButton("🚨 Help")
+        self.emergency_help_button = QPushButton("Help")
         self.emergency_help_button.setObjectName("emergency_help_button")
         self.emergency_help_button.setMinimumSize(120, TOUCH_BUTTON_HEIGHT)
         self.emergency_help_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -282,7 +278,7 @@ class PublicMainWindow(QMainWindow):
         self.emergency_help_button.setLayoutDirection(direction)
 
         for key, button in self.sidebar_buttons.items():
-            button.setText(translations.get(key, "🔐 Data"))
+            button.setText(translations.get(key, "Data"))
             button.setLayoutDirection(direction)
             button.setStyleSheet(
                 SIDEBAR_BUTTON_STYLE.replace(

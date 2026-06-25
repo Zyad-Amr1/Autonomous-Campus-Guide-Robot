@@ -1,39 +1,40 @@
-"""Centralize the visual identity of the ECU public dashboard.
+"""Shared visual system for the ECU public touchscreen dashboard."""
 
-The public dashboard is a touch-friendly kiosk interface designed for quick,
-comfortable use on the ECU guidance robot. Its palette uses ECU-style navy
-and gold branding, with shared typography, spacing, and reusable
-PySide6-compatible stylesheet strings defined in one place.
-"""
-
-NAVY = "#0B2A52"
-NAVY_DARK = "#081F3D"
-NAVY_LIGHT = "#163B6D"
-GOLD = "#D4A43B"
-GOLD_LIGHT = "#E6BC5A"
+ECU_RED = "#D71920"
+ECU_RED_DARK = "#B9151B"
+CHARCOAL = "#202124"
+BLACK = "#111827"
 WHITE = "#FFFFFF"
-OFF_WHITE = "#F7F5F0"
-LIGHT_GRAY = "#E8E4DA"
-TEXT_DARK = "#10233E"
-TEXT_MUTED = "#5C6B80"
-SUCCESS = "#22C55E"
+OFF_WHITE = "#F7F7F5"
+LIGHT_GRAY = "#F1F3F5"
+BORDER = "#E5E7EB"
+TEXT_DARK = "#1F2937"
+TEXT_MUTED = "#6B7280"
+SUCCESS = "#16A34A"
 WARNING = "#F59E0B"
-DANGER = "#EF4444"
-INFO = "#38BDF8"
+DANGER = ECU_RED
+INFO = "#2563EB"
+
+# Backward-compatible public UI aliases used by existing screens.
+NAVY = CHARCOAL
+NAVY_DARK = BLACK
+NAVY_LIGHT = "#34373C"
+GOLD = ECU_RED
+GOLD_LIGHT = "#FDE8EA"
 
 FONT_FAMILY = "Segoe UI"
 HEADER_FONT_SIZE = 32
 TITLE_FONT_SIZE = 26
 BODY_FONT_SIZE = 18
 SMALL_FONT_SIZE = 14
-BUTTON_FONT_SIZE = 18
+BUTTON_FONT_SIZE = 17
 
-TOUCH_BUTTON_HEIGHT = 64
-CARD_RADIUS = 22
+TOUCH_BUTTON_HEIGHT = 60
+CARD_RADIUS = 24
 BUTTON_RADIUS = 16
-PAGE_PADDING = 32
-CARD_PADDING = 24
-SIDEBAR_WIDTH = 252
+PAGE_PADDING = 30
+CARD_PADDING = 22
+SIDEBAR_WIDTH = 218
 
 
 def px(value: int) -> str:
@@ -43,10 +44,7 @@ def px(value: int) -> str:
 
 def font(size: int, weight: int | None = None) -> str:
     """Return shared font-family, size, and optional weight declarations."""
-    declarations = (
-        f'font-family: "{FONT_FAMILY}"; '
-        f"font-size: {px(size)};"
-    )
+    declarations = f'font-family: "{FONT_FAMILY}"; font-size: {px(size)};'
     if weight is not None:
         declarations += f" font-weight: {weight};"
     return declarations
@@ -60,127 +58,58 @@ def min_touch_height() -> str:
 APP_BACKGROUND_STYLE = f"""
 QWidget {{
     background-color: {OFF_WHITE};
-    color: {WHITE};
+    color: {TEXT_DARK};
     {font(BODY_FONT_SIZE)}
 }}
 """.strip()
 
 HEADER_STYLE = f"""
 QLabel {{
-    color: {WHITE};
-    {font(HEADER_FONT_SIZE, 700)}
+    color: {TEXT_DARK};
+    {font(HEADER_FONT_SIZE, 850)}
 }}
 """.strip()
 
 SUBTITLE_STYLE = f"""
 QLabel {{
-    color: {LIGHT_GRAY};
-    {font(BODY_FONT_SIZE)}
+    color: {TEXT_MUTED};
+    {font(BODY_FONT_SIZE, 600)}
 }}
 """.strip()
 
-PRIMARY_BUTTON_STYLE = f"""
-QPushButton {{
-    background-color: {GOLD};
-    color: {NAVY_DARK};
+SIDEBAR_STYLE = f"""
+QFrame {{
+    background-color: {CHARCOAL};
     border: none;
-    border-radius: {px(BUTTON_RADIUS)};
-    padding: 0 {px(CARD_PADDING)};
-    {font(BUTTON_FONT_SIZE, 700)}
-    {min_touch_height()}
-}}
-QPushButton:hover {{
-    background-color: {GOLD_LIGHT};
-}}
-QPushButton:pressed {{
-    background-color: {GOLD};
-    padding-top: {px(2)};
-}}
-""".strip()
-
-SECONDARY_BUTTON_STYLE = f"""
-QPushButton {{
-    background-color: {NAVY_LIGHT};
-    color: {WHITE};
-    border: 1px solid {INFO};
-    border-radius: {px(BUTTON_RADIUS)};
-    padding: 0 {px(CARD_PADDING)};
-    {font(BUTTON_FONT_SIZE, 600)}
-    {min_touch_height()}
-}}
-QPushButton:hover {{
-    background-color: {NAVY};
-    border-color: {GOLD_LIGHT};
-}}
-QPushButton:pressed {{
-    background-color: {NAVY_DARK};
-}}
-""".strip()
-
-CARD_STYLE = f"""
-QFrame {{
-    background-color: {OFF_WHITE};
-    color: {TEXT_DARK};
-    border: 1px solid {LIGHT_GRAY};
-    border-radius: {px(CARD_RADIUS)};
-    padding: {px(CARD_PADDING)};
-    {font(BODY_FONT_SIZE)}
-}}
-""".strip()
-
-GLASS_CARD_STYLE = f"""
-QFrame {{
-    background-color: {NAVY_LIGHT};
-    color: {WHITE};
-    border: 1px solid rgba(255, 255, 255, 42);
-    border-radius: {px(CARD_RADIUS)};
-    padding: {px(CARD_PADDING)};
-    {font(BODY_FONT_SIZE)}
 }}
 """.strip()
 
 SIDEBAR_BUTTON_STYLE = f"""
 QPushButton {{
     background-color: transparent;
-    color: {OFF_WHITE};
+    color: #D1D5DB;
     border: none;
+    border-left: 4px solid transparent;
     border-radius: {px(14)};
-    padding: 0 {px(CARD_PADDING)};
+    padding: 0 {px(16)};
     text-align: left;
-    {font(BUTTON_FONT_SIZE, 600)}
+    {font(15, 700)}
     {min_touch_height()}
 }}
 QPushButton:hover {{
-    background-color: {NAVY_LIGHT};
+    background-color: rgba(255, 255, 255, 18);
+    color: {WHITE};
 }}
 QPushButton:checked {{
-    background-color: {GOLD};
-    color: {TEXT_DARK};
+    background-color: rgba(215, 25, 32, 34);
+    color: {WHITE};
+    border-left: 4px solid {ECU_RED};
 }}
 """.strip()
 
-FLOATING_CHAT_BUTTON_STYLE = f"""
+PRIMARY_BUTTON_STYLE = f"""
 QPushButton {{
-    background-color: {GOLD};
-    color: {NAVY_DARK};
-    border: 2px solid {GOLD_LIGHT};
-    border-radius: {px(TOUCH_BUTTON_HEIGHT // 2)};
-    min-width: {px(TOUCH_BUTTON_HEIGHT)};
-    max-width: {px(TOUCH_BUTTON_HEIGHT)};
-    {font(BUTTON_FONT_SIZE, 800)}
-    {min_touch_height()}
-}}
-QPushButton:hover {{
-    background-color: {GOLD_LIGHT};
-}}
-QPushButton:pressed {{
-    background-color: {GOLD};
-}}
-""".strip()
-
-EMERGENCY_BUTTON_STYLE = f"""
-QPushButton {{
-    background-color: {DANGER};
+    background-color: {ECU_RED};
     color: {WHITE};
     border: none;
     border-radius: {px(BUTTON_RADIUS)};
@@ -189,9 +118,148 @@ QPushButton {{
     {min_touch_height()}
 }}
 QPushButton:hover {{
-    background-color: #DC2626;
+    background-color: {ECU_RED_DARK};
 }}
 QPushButton:pressed {{
-    background-color: #B91C1C;
+    background-color: {ECU_RED_DARK};
+    padding-top: {px(2)};
+}}
+""".strip()
+
+SECONDARY_BUTTON_STYLE = f"""
+QPushButton {{
+    background-color: {WHITE};
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER};
+    border-radius: {px(BUTTON_RADIUS)};
+    padding: 0 {px(CARD_PADDING)};
+    {font(BUTTON_FONT_SIZE, 750)}
+    {min_touch_height()}
+}}
+QPushButton:hover {{
+    border-color: {ECU_RED};
+    background-color: #FFF7F7;
+}}
+QPushButton:pressed {{
+    background-color: {GOLD_LIGHT};
+}}
+""".strip()
+
+CARD_STYLE = f"""
+QFrame {{
+    background-color: {WHITE};
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER};
+    border-radius: {px(CARD_RADIUS)};
+    padding: {px(CARD_PADDING)};
+    {font(BODY_FONT_SIZE)}
+}}
+""".strip()
+
+FEATURE_CARD_STYLE = f"""
+QPushButton {{
+    background-color: {WHITE};
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER};
+    border-radius: {px(CARD_RADIUS)};
+    padding: {px(18)} {px(CARD_PADDING)};
+    text-align: left;
+    {font(17, 800)}
+}}
+QPushButton:hover {{
+    border-color: {ECU_RED};
+    background-color: #FFF9F9;
+}}
+QPushButton:pressed {{
+    background-color: {GOLD_LIGHT};
+}}
+""".strip()
+
+GLASS_CARD_STYLE = CARD_STYLE
+
+SEARCH_INPUT_STYLE = f"""
+QLineEdit,
+QComboBox {{
+    background-color: {WHITE};
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER};
+    border-radius: {px(16)};
+    padding: 0 {px(CARD_PADDING)};
+    {font(15, 700)}
+    {min_touch_height()}
+}}
+QLineEdit:focus,
+QComboBox:focus {{
+    border: 2px solid {ECU_RED};
+}}
+""".strip()
+
+CHIP_STYLE = f"""
+QPushButton {{
+    background-color: {WHITE};
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER};
+    border-radius: {px(TOUCH_BUTTON_HEIGHT // 2)};
+    padding: 0 {px(18)};
+    {font(14, 750)}
+    {min_touch_height()}
+}}
+QPushButton:hover {{
+    border-color: {ECU_RED};
+    background-color: #FFF9F9;
+}}
+""".strip()
+
+TABLE_STYLE = f"""
+QTableWidget {{
+    background-color: {WHITE};
+    alternate-background-color: {LIGHT_GRAY};
+    color: {TEXT_DARK};
+    gridline-color: {BORDER};
+    border: 1px solid {BORDER};
+    border-radius: {px(CARD_RADIUS)};
+    selection-background-color: {GOLD_LIGHT};
+    selection-color: {TEXT_DARK};
+    {font(14, 550)}
+}}
+QHeaderView::section {{
+    background-color: {CHARCOAL};
+    color: {WHITE};
+    border: none;
+    padding: 10px;
+    {font(13, 800)}
+}}
+""".strip()
+
+FLOATING_CHAT_BUTTON_STYLE = f"""
+QPushButton {{
+    background-color: {CHARCOAL};
+    color: {WHITE};
+    border: 2px solid {WHITE};
+    border-radius: {px(TOUCH_BUTTON_HEIGHT // 2)};
+    {font(BUTTON_FONT_SIZE, 850)}
+    {min_touch_height()}
+}}
+QPushButton:hover {{
+    background-color: {BLACK};
+    border-color: {ECU_RED};
+}}
+""".strip()
+
+EMERGENCY_BUTTON_STYLE = f"""
+QPushButton {{
+    background-color: {ECU_RED};
+    color: {WHITE};
+    border: none;
+    border-radius: {px(BUTTON_RADIUS)};
+    padding: 0 {px(CARD_PADDING)};
+    {font(BUTTON_FONT_SIZE, 850)}
+    {min_touch_height()}
+}}
+QPushButton:hover {{
+    background-color: {ECU_RED_DARK};
+}}
+QPushButton:pressed {{
+    background-color: {ECU_RED_DARK};
 }}
 """.strip()

@@ -11,12 +11,13 @@ from PySide6.QtWidgets import (
 )
 
 from ui.public.theme import (
+    BORDER,
     CARD_PADDING,
     CARD_RADIUS,
-    GOLD,
+    CHARCOAL,
+    ECU_RED,
+    ECU_RED_DARK,
     GOLD_LIGHT,
-    NAVY,
-    NAVY_LIGHT,
     OFF_WHITE,
     PAGE_PADDING,
     TEXT_DARK,
@@ -119,17 +120,17 @@ class AdminGateScreen(QWidget):
 
             QFrame#admin_gate_card {{
                 background-color: {WHITE};
-                border: 1px solid rgba(92, 107, 128, 70);
+                border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS + 6)};
             }}
 
             QLabel#admin_gate_eyebrow {{
-                color: {GOLD};
+                color: {ECU_RED};
                 {font(13, 850)}
             }}
 
             QLabel#admin_gate_title {{
-                color: {NAVY};
+                color: {CHARCOAL};
                 {font(32, 850)}
             }}
 
@@ -141,18 +142,18 @@ class AdminGateScreen(QWidget):
             QLineEdit#admin_password_input {{
                 background-color: {OFF_WHITE};
                 color: {TEXT_DARK};
-                border: 1px solid rgba(92, 107, 128, 90);
+                border: 1px solid {BORDER};
                 border-radius: {px(18)};
                 padding: 0 {px(CARD_PADDING)};
                 {font(17, 650)}
             }}
 
             QLineEdit#admin_password_input:focus {{
-                border: 2px solid {GOLD};
+                border: 2px solid {ECU_RED};
             }}
 
             QPushButton#admin_unlock_button {{
-                background-color: {NAVY};
+                background-color: {ECU_RED};
                 color: {WHITE};
                 border: none;
                 border-radius: {px(18)};
@@ -161,7 +162,7 @@ class AdminGateScreen(QWidget):
             }}
 
             QPushButton#admin_unlock_button:hover {{
-                background-color: {NAVY_LIGHT};
+                background-color: {ECU_RED_DARK};
             }}
 
             QPushButton#admin_unlock_button:pressed {{

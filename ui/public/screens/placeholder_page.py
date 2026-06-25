@@ -4,14 +4,16 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from ui.public.theme import (
+    BORDER,
     CARD_STYLE,
-    GLASS_CARD_STYLE,
-    GOLD,
+    ECU_RED,
     HEADER_STYLE,
-    NAVY_DARK,
+    OFF_WHITE,
     PAGE_PADDING,
     SUBTITLE_STYLE,
     TEXT_DARK,
+    WHITE,
+    font,
 )
 
 
@@ -35,7 +37,7 @@ class PlaceholderPage(QWidget):
         self.setStyleSheet(
             f"""
             QWidget#public_placeholder_page {{
-                background-color: {NAVY_DARK};
+                background-color: {OFF_WHITE};
                 border: none;
             }}
             """
@@ -53,11 +55,13 @@ class PlaceholderPage(QWidget):
         card.setObjectName("public_placeholder_card")
         card.setMinimumHeight(440)
         card.setStyleSheet(
-            GLASS_CARD_STYLE.replace(
-                "QFrame {",
-                "QFrame#public_placeholder_card {",
-                1,
-            )
+            f"""
+            QFrame#public_placeholder_card {{
+                background-color: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: 28px;
+            }}
+            """
         )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(52, 46, 52, 46)
@@ -70,12 +74,11 @@ class PlaceholderPage(QWidget):
         self.placeholder_icon_label.setStyleSheet(
             f"""
             QLabel#placeholder_icon_label {{
-                background-color: {GOLD};
-                color: {NAVY_DARK};
+                background-color: {ECU_RED};
+                color: {WHITE};
                 border: none;
                 border-radius: 15px;
-                font-size: 25px;
-                font-weight: 800;
+                {font(22, 900)}
             }}
             """
         )

@@ -29,6 +29,7 @@ from ui.public.theme import (
     ECU_RED_DARK,
     GOLD,
     GOLD_LIGHT,
+    LIGHT_GRAY,
     NAVY,
     NAVY_DARK,
     NAVY_LIGHT,
@@ -138,6 +139,7 @@ class MapCanvas(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.background_image_path: str | None = None
+        self.resolved_background_image_path: Path | None = None
         self._background_pixmap = QPixmap()
         self.landmarks = LANDMARKS.copy()
         self.path_points = {**PATH_NODES, **self.landmarks}
@@ -158,6 +160,7 @@ class MapCanvas(QWidget):
         image_path = Path(path)
         if not image_path.is_absolute():
             image_path = Path(__file__).resolve().parents[3] / image_path
+        self.resolved_background_image_path = image_path
         self._background_pixmap = (
             QPixmap(str(image_path)) if image_path.exists() else QPixmap()
         )
@@ -786,9 +789,9 @@ class MapScreen(QWidget):
             }}
 
             QPushButton {{
-                background-color: {CHARCOAL};
-                color: {WHITE};
-                border: none;
+                background-color: {WHITE};
+                color: {CHARCOAL};
+                border: 1px solid {BORDER};
                 border-radius: {px(14)};
                 padding: 0 {px(14)};
                 min-height: {px(BUTTON_HEIGHT)};
@@ -796,17 +799,38 @@ class MapScreen(QWidget):
             }}
 
             QPushButton:hover {{
-                background-color: {NAVY_DARK};
+                background-color: #FFF7F7;
+                border-color: rgba(215, 25, 32, 120);
             }}
 
             QPushButton:pressed {{
+                background-color: {GOLD_LIGHT};
+                color: {CHARCOAL};
+            }}
+
+            QPushButton#map_find_route_button,
+            QPushButton#map_start_walk_button {{
+                background-color: {ECU_RED};
+                color: {WHITE};
+                border: none;
+            }}
+
+            QPushButton#map_find_route_button:hover,
+            QPushButton#map_start_walk_button:hover {{
                 background-color: {ECU_RED_DARK};
                 color: {WHITE};
             }}
 
+            QPushButton#map_find_route_button:pressed,
+            QPushButton#map_start_walk_button:pressed {{
+                background-color: {CHARCOAL};
+                color: {WHITE};
+            }}
+
             QPushButton:disabled {{
-                background-color: rgba(92, 107, 128, 55);
+                background-color: {LIGHT_GRAY};
                 color: rgba(34, 43, 55, 130);
+                border-color: {BORDER};
             }}
 
             QWidget#map_canvas {{

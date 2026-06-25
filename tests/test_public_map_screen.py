@@ -1,6 +1,7 @@
 """Headless tests for the public campus map route screen."""
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -102,12 +103,28 @@ def test_map_canvas_supports_background_image_path(tmp_path) -> None:
     try:
         assert application is not None
         assert canvas.background_image_path is None
+        assert canvas.resolved_background_image_path is None
         canvas.set_background_image(str(image_path))
         assert canvas.background_image_path == str(image_path)
+        assert canvas.resolved_background_image_path == image_path
         canvas.set_background_image(str(tmp_path / "missing.png"))
         assert canvas.background_image_path == str(tmp_path / "missing.png")
+        assert canvas.resolved_background_image_path == tmp_path / "missing.png"
     finally:
         canvas.close()
+
+
+def test_map_screen_resolves_default_image_path_from_project_root() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/ecu_campus_map.png"
+    try:
+        assert application is not None
+        assert screen.map_image_path == "assets/maps/ecu_campus_map.png"
+        assert screen.map_canvas.background_image_path == "assets/maps/ecu_campus_map.png"
+        assert screen.map_canvas.resolved_background_image_path == expected_path
+    finally:
+        screen.close()
 
 
 def test_show_map_switches_to_map_page() -> None:

@@ -1,6 +1,7 @@
 """Headless tests for public campus map walking navigation."""
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -41,10 +42,12 @@ def test_from_to_combo_boxes_exist() -> None:
 def test_map_image_path_support_exists() -> None:
     application = _get_application()
     screen = MapScreen()
+    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/ecu_campus_map.png"
     try:
         assert application is not None
         assert screen.map_image_path == "assets/maps/ecu_campus_map.png"
         assert screen.map_canvas.background_image_path == "assets/maps/ecu_campus_map.png"
+        assert screen.map_canvas.resolved_background_image_path == expected_path
     finally:
         screen.close()
 

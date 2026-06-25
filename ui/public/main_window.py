@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.public.screens.home_screen import HomeScreen
+from ui.public.screens.map_screen import MapScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
     APP_BACKGROUND_STYLE,
@@ -45,7 +46,6 @@ class PublicMainWindow(QMainWindow):
     )
 
     _PLACEHOLDER_PAGES = (
-        ("map", "MAP"),
         ("staff", "STAFF"),
         ("schedule", "TIME"),
         ("news", "NEWS"),
@@ -234,6 +234,8 @@ class PublicMainWindow(QMainWindow):
         )
         self.home_screen = HomeScreen(self)
         page_stack.addWidget(self.home_screen)
+        self.map_screen = MapScreen()
+        page_stack.addWidget(self.map_screen)
 
         for key, icon in self._PLACEHOLDER_PAGES:
             page = PlaceholderPage("", "", icon)
@@ -261,6 +263,7 @@ class PublicMainWindow(QMainWindow):
         self.centralWidget().setLayoutDirection(direction)
         self.public_page_stack.setLayoutDirection(direction)
         self.home_screen.setLayoutDirection(direction)
+        self.map_screen.setLayoutDirection(direction)
         self.setWindowTitle(translations["app_title"].replace("\n", " "))
         self.app_title_label.setText(translations["app_title"])
         self.app_subtitle_label.setText(translations["app_subtitle"])
@@ -294,6 +297,7 @@ class PublicMainWindow(QMainWindow):
                 translations[f"placeholder_{key}_subtitle"],
                 translations["placeholder_message"],
             )
+        self.map_screen.update_language(translations)
 
     def show_emergency_help(self) -> None:
         """Show hardcoded emergency contact information for public users."""

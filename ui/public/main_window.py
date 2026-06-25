@@ -164,7 +164,7 @@ class PublicMainWindow(QMainWindow):
         content.setStyleSheet(
             f"""
             QFrame#public_shell_content {{
-                background-color: {NAVY_DARK};
+                background-color: {OFF_WHITE};
                 border: none;
             }}
             """
@@ -227,7 +227,7 @@ class PublicMainWindow(QMainWindow):
         page_stack.setStyleSheet(
             f"""
             QStackedWidget#public_page_stack {{
-                background-color: {NAVY_DARK};
+                background-color: {OFF_WHITE};
                 border: none;
             }}
             """

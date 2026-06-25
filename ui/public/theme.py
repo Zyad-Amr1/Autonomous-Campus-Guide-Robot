@@ -6,16 +6,16 @@ and gold branding, with shared typography, spacing, and reusable
 PySide6-compatible stylesheet strings defined in one place.
 """
 
-NAVY = "#0B2545"
-NAVY_DARK = "#061A33"
-NAVY_LIGHT = "#153B66"
-GOLD = "#D9A441"
-GOLD_LIGHT = "#F4C95D"
+NAVY = "#0B2A52"
+NAVY_DARK = "#081F3D"
+NAVY_LIGHT = "#163B6D"
+GOLD = "#D4A43B"
+GOLD_LIGHT = "#E6BC5A"
 WHITE = "#FFFFFF"
-OFF_WHITE = "#F8FAFC"
-LIGHT_GRAY = "#E5E7EB"
-TEXT_DARK = "#0F172A"
-TEXT_MUTED = "#64748B"
+OFF_WHITE = "#F7F5F0"
+LIGHT_GRAY = "#E8E4DA"
+TEXT_DARK = "#10233E"
+TEXT_MUTED = "#5C6B80"
 SUCCESS = "#22C55E"
 WARNING = "#F59E0B"
 DANGER = "#EF4444"
@@ -29,11 +29,11 @@ SMALL_FONT_SIZE = 14
 BUTTON_FONT_SIZE = 18
 
 TOUCH_BUTTON_HEIGHT = 64
-CARD_RADIUS = 24
-BUTTON_RADIUS = 18
+CARD_RADIUS = 22
+BUTTON_RADIUS = 16
 PAGE_PADDING = 32
 CARD_PADDING = 24
-SIDEBAR_WIDTH = 240
+SIDEBAR_WIDTH = 252
 
 
 def px(value: int) -> str:
@@ -59,7 +59,7 @@ def min_touch_height() -> str:
 
 APP_BACKGROUND_STYLE = f"""
 QWidget {{
-    background-color: {NAVY_DARK};
+    background-color: {OFF_WHITE};
     color: {WHITE};
     {font(BODY_FONT_SIZE)}
 }}
@@ -130,9 +130,9 @@ QFrame {{
 
 GLASS_CARD_STYLE = f"""
 QFrame {{
-    background-color: rgba(21, 59, 102, 210);
+    background-color: {NAVY_LIGHT};
     color: {WHITE};
-    border: 1px solid rgba(255, 255, 255, 55);
+    border: 1px solid rgba(255, 255, 255, 42);
     border-radius: {px(CARD_RADIUS)};
     padding: {px(CARD_PADDING)};
     {font(BODY_FONT_SIZE)}
@@ -144,7 +144,7 @@ QPushButton {{
     background-color: transparent;
     color: {OFF_WHITE};
     border: none;
-    border-radius: {px(BUTTON_RADIUS)};
+    border-radius: {px(14)};
     padding: 0 {px(CARD_PADDING)};
     text-align: left;
     {font(BUTTON_FONT_SIZE, 600)}
@@ -155,7 +155,7 @@ QPushButton:hover {{
 }}
 QPushButton:checked {{
     background-color: {GOLD};
-    color: {NAVY_DARK};
+    color: {TEXT_DARK};
 }}
 """.strip()
 

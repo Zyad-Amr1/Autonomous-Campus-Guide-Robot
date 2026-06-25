@@ -1,7 +1,8 @@
 """Modern touch-first home screen for the ECU public dashboard."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDateTime, Qt
 from PySide6.QtWidgets import (
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.public.theme import (
+    CARD_PADDING,
     CARD_RADIUS,
     GOLD,
     GOLD_LIGHT,
@@ -23,6 +25,7 @@ from ui.public.theme import (
     OFF_WHITE,
     PAGE_PADDING,
     TEXT_DARK,
+    TEXT_MUTED,
     TOUCH_BUTTON_HEIGHT,
     WHITE,
     font,
@@ -50,53 +53,132 @@ class HomeScreen(QWidget):
         self._apply_styles()
 
     def _build_ui(self) -> None:
-        """Arrange welcome copy, three large cards, and secondary tiles."""
+        """Arrange the branded header, hero panel, cards, and quick asks."""
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(
-            PAGE_PADDING * 2,
-            PAGE_PADDING * 2,
-            PAGE_PADDING * 2,
-            PAGE_PADDING * 2,
+            PAGE_PADDING + 10,
+            PAGE_PADDING,
+            PAGE_PADDING + 10,
+            PAGE_PADDING,
         )
-        page_layout.setSpacing(26)
+        page_layout.setSpacing(18)
+
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(18)
+        header_copy = QVBoxLayout()
+        header_copy.setSpacing(3)
+        self.home_brand_label = QLabel("ECU Smart Assistant")
+        self.home_brand_label.setObjectName("home_brand_label")
+        self.home_brand_subtitle = QLabel("Public guidance dashboard")
+        self.home_brand_subtitle.setObjectName("home_brand_subtitle")
+        header_copy.addWidget(self.home_brand_label)
+        header_copy.addWidget(self.home_brand_subtitle)
+        self.home_header_badge = QLabel("Egyptian Chinese University")
+        self.home_header_badge.setObjectName("home_header_badge")
+        self.home_header_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addLayout(header_copy)
+        header_layout.addStretch()
+        header_layout.addWidget(self.home_header_badge)
+        page_layout.addLayout(header_layout)
+
+        hero_card = QFrame()
+        hero_card.setObjectName("home_hero_card")
+        hero_layout = QHBoxLayout(hero_card)
+        hero_layout.setContentsMargins(30, 24, 26, 24)
+        hero_layout.setSpacing(28)
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(8)
 
         self.home_welcome_title = QLabel("Welcome to ECU Smart Assistant")
         self.home_welcome_title.setObjectName("home_welcome_title")
         self.home_welcome_title.setWordWrap(True)
-
         self.home_welcome_subtitle = QLabel(
             "Choose what you need from the robot guide."
         )
         self.home_welcome_subtitle.setObjectName("home_welcome_subtitle")
         self.home_welcome_subtitle.setWordWrap(True)
+        hero_copy.addWidget(self.home_welcome_title)
+        hero_copy.addWidget(self.home_welcome_subtitle)
+        hero_copy.addStretch()
 
-        page_layout.addWidget(self.home_welcome_title)
-        page_layout.addWidget(self.home_welcome_subtitle)
+        self.home_time_block = QFrame()
+        self.home_time_block.setObjectName("home_time_block")
+        time_layout = QVBoxLayout(self.home_time_block)
+        time_layout.setContentsMargins(22, 16, 22, 16)
+        time_layout.setSpacing(4)
+        now = QDateTime.currentDateTime()
+        self.home_time_label = QLabel(now.toString("h:mm AP"))
+        self.home_time_label.setObjectName("home_time_label")
+        self.home_date_label = QLabel(now.toString("dddd, MMMM d"))
+        self.home_date_label.setObjectName("home_date_label")
+        self.home_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.home_date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        time_layout.addWidget(self.home_time_label)
+        time_layout.addWidget(self.home_date_label)
 
-        main_tiles = QGridLayout()
-        main_tiles.setSpacing(18)
+        hero_layout.addLayout(hero_copy, stretch=1)
+        hero_layout.addWidget(self.home_time_block)
+        page_layout.addWidget(hero_card)
+
+        self.home_explore_title = QLabel("Explore")
+        self.home_explore_title.setObjectName("home_explore_title")
+        page_layout.addWidget(self.home_explore_title)
+
+        explore_tiles = QGridLayout()
+        explore_tiles.setSpacing(14)
         self.home_map_tile = self._create_tile(
-            "🗺️ Campus Map",
+            "Campus Map\nFind buildings and rooms",
             "home_map_tile",
             "map",
-            is_primary=True,
+        )
+        self.home_staff_tile = self._create_tile(
+            "Staff Directory\nFind professors and offices",
+            "home_staff_tile",
+            "staff",
+        )
+        self.home_schedule_tile = self._create_tile(
+            "Today's Schedule\nView classes and rooms",
+            "home_schedule_tile",
+            "schedule",
+        )
+        self.home_news_tile = self._create_tile(
+            "Events & News\nSee campus updates",
+            "home_news_tile",
+            "news",
+        )
+        self.home_about_tile = self._create_tile(
+            "About ECU\nUniversity information",
+            "home_about_tile",
+            "about",
         )
         self.home_chat_tile = self._create_tile(
-            "💬 Ask Chatbot",
+            "Ask the Assistant\nGet quick answers",
             "home_chat_tile",
             "chat",
-            is_primary=True,
         )
-        self.home_info_tile = self._create_tile(
-            "🏛️ University Info",
-            "home_info_tile",
-            "about",
-            is_primary=True,
+        explore_tiles.addWidget(self.home_map_tile, 0, 0)
+        explore_tiles.addWidget(self.home_staff_tile, 0, 1)
+        explore_tiles.addWidget(self.home_schedule_tile, 0, 2)
+        explore_tiles.addWidget(self.home_news_tile, 1, 0)
+        explore_tiles.addWidget(self.home_about_tile, 1, 1)
+        explore_tiles.addWidget(self.home_chat_tile, 1, 2)
+        page_layout.addLayout(explore_tiles, stretch=1)
+
+        self.home_info_tile = QPushButton(self)
+        self.home_info_tile.setObjectName("home_info_tile")
+        self.home_info_tile.setMinimumHeight(118)
+        self.home_info_tile.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
         )
-        main_tiles.addWidget(self.home_map_tile, 0, 0)
-        main_tiles.addWidget(self.home_chat_tile, 0, 1)
-        main_tiles.addWidget(self.home_info_tile, 0, 2)
-        page_layout.addLayout(main_tiles, stretch=2)
+        self.home_info_tile.hide()
+        callback = getattr(self.parent_window, "show_about", None)
+        if callback is not None:
+            self.home_info_tile.clicked.connect(callback)
+
+        self.quick_ask_title = QLabel("Quick Ask")
+        self.quick_ask_title.setObjectName("quick_ask_title")
+        page_layout.addWidget(self.quick_ask_title)
 
         self.quick_ask_section = QWidget()
         self.quick_ask_section.setObjectName("quick_ask_section")
@@ -111,49 +193,18 @@ class HomeScreen(QWidget):
             quick_ask_layout.addWidget(chip)
         page_layout.addWidget(self.quick_ask_section)
 
-        secondary_tiles = QGridLayout()
-        secondary_tiles.setSpacing(14)
-        self.home_staff_tile = self._create_tile(
-            "👨‍🏫 Staff",
-            "home_staff_tile",
-            "staff",
-        )
-        self.home_schedule_tile = self._create_tile(
-            "📚 Schedule",
-            "home_schedule_tile",
-            "schedule",
-        )
-        self.home_news_tile = self._create_tile(
-            "📰 News",
-            "home_news_tile",
-            "news",
-        )
-        self.home_about_tile = self._create_tile(
-            "🏛️ About ECU",
-            "home_about_tile",
-            "about",
-        )
-        secondary_tiles.addWidget(self.home_staff_tile, 0, 0)
-        secondary_tiles.addWidget(self.home_schedule_tile, 0, 1)
-        secondary_tiles.addWidget(self.home_news_tile, 0, 2)
-        secondary_tiles.addWidget(self.home_about_tile, 0, 3)
-        page_layout.addLayout(secondary_tiles, stretch=1)
-        page_layout.addStretch()
-
     def _create_tile(
         self,
         text: str,
         object_name: str,
         navigation_key: str,
-        *,
-        is_primary: bool = False,
     ) -> QPushButton:
-        """Create one large, touch-friendly home tile."""
+        """Create one touch-friendly Explore card."""
         button = QPushButton(text)
         button.setObjectName(object_name)
-        button.setProperty("tileRole", "primary" if is_primary else "secondary")
+        button.setProperty("tileRole", "explore")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setMinimumHeight(TOUCH_BUTTON_HEIGHT * (2 if is_primary else 1))
+        button.setMinimumHeight(118)
         button.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -186,9 +237,33 @@ class HomeScreen(QWidget):
         self.setStyleSheet(
             f"""
             QWidget#public_home_screen {{
-                background-color: {NAVY_DARK};
-                color: {WHITE};
+                background-color: {OFF_WHITE};
+                color: {TEXT_DARK};
                 {font(18)}
+            }}
+
+            QLabel#home_brand_label {{
+                color: {NAVY};
+                {font(24, 850)}
+            }}
+
+            QLabel#home_brand_subtitle {{
+                color: {TEXT_MUTED};
+                {font(13, 650)}
+            }}
+
+            QLabel#home_header_badge {{
+                background-color: {NAVY};
+                color: {OFF_WHITE};
+                border-radius: {px(18)};
+                padding: 8px 18px;
+                {font(12, 800)}
+            }}
+
+            QFrame#home_hero_card {{
+                background-color: {NAVY};
+                border: 1px solid {NAVY_LIGHT};
+                border-radius: {px(CARD_RADIUS + 6)};
             }}
 
             QLabel#home_welcome_title {{
@@ -201,42 +276,45 @@ class HomeScreen(QWidget):
                 {font(18, 500)}
             }}
 
-            QPushButton[tileRole="primary"] {{
+            QFrame#home_time_block {{
                 background-color: {OFF_WHITE};
+                border: 1px solid rgba(212, 164, 59, 90);
+                border-radius: {px(CARD_RADIUS)};
+            }}
+
+            QLabel#home_time_label {{
                 color: {TEXT_DARK};
-                border: 2px solid {GOLD};
-                border-radius: {px(CARD_RADIUS)};
-                padding: 0 {px(PAGE_PADDING)};
-                text-align: left;
-                {font(24, 800)}
+                {font(28, 850)}
             }}
 
-            QPushButton[tileRole="primary"]:hover {{
+            QLabel#home_date_label {{
+                color: {TEXT_MUTED};
+                {font(13, 700)}
+            }}
+
+            QLabel#home_explore_title,
+            QLabel#quick_ask_title {{
+                color: {NAVY};
+                {font(20, 850)}
+            }}
+
+            QPushButton[tileRole="explore"] {{
+                background-color: {WHITE};
+                color: {TEXT_DARK};
+                border: 1px solid rgba(92, 107, 128, 70);
+                border-radius: {px(CARD_RADIUS)};
+                padding: {px(14)} {px(CARD_PADDING)};
+                text-align: left;
+                {font(17, 800)}
+            }}
+
+            QPushButton[tileRole="explore"]:hover {{
+                background-color: {OFF_WHITE};
+                border-color: {GOLD};
+            }}
+
+            QPushButton[tileRole="explore"]:pressed {{
                 background-color: {GOLD_LIGHT};
-                border-color: {GOLD_LIGHT};
-            }}
-
-            QPushButton[tileRole="primary"]:pressed {{
-                background-color: {GOLD};
-            }}
-
-            QPushButton[tileRole="secondary"] {{
-                background-color: {NAVY_LIGHT};
-                color: {OFF_WHITE};
-                border: 1px solid {NAVY};
-                border-radius: {px(CARD_RADIUS)};
-                padding: 0 {px(22)};
-                text-align: left;
-                {font(18, 700)}
-            }}
-
-            QPushButton[tileRole="secondary"]:hover {{
-                background-color: {NAVY};
-                border-color: {GOLD_LIGHT};
-            }}
-
-            QPushButton[tileRole="secondary"]:pressed {{
-                background-color: {NAVY_DARK};
             }}
 
             QWidget#quick_ask_section {{
@@ -244,9 +322,9 @@ class HomeScreen(QWidget):
             }}
 
             QPushButton[tileRole="quickAsk"] {{
-                background-color: rgba(255, 255, 255, 24);
-                color: {OFF_WHITE};
-                border: 1px solid rgba(244, 201, 93, 150);
+                background-color: {WHITE};
+                color: {TEXT_DARK};
+                border: 1px solid rgba(92, 107, 128, 70);
                 border-radius: {px(TOUCH_BUTTON_HEIGHT // 2)};
                 padding: 0 {px(18)};
                 text-align: left;
@@ -254,12 +332,12 @@ class HomeScreen(QWidget):
             }}
 
             QPushButton[tileRole="quickAsk"]:hover {{
-                background-color: {NAVY_LIGHT};
-                border-color: {GOLD_LIGHT};
+                background-color: {OFF_WHITE};
+                border-color: {GOLD};
             }}
 
             QPushButton[tileRole="quickAsk"]:pressed {{
-                background-color: {NAVY};
+                background-color: {GOLD_LIGHT};
             }}
             """
         )

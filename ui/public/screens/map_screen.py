@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QCompleter,
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -19,8 +20,13 @@ from PySide6.QtWidgets import (
 )
 
 from ui.public.theme import (
+    BORDER,
+    BUTTON_HEIGHT,
     CARD_PADDING,
     CARD_RADIUS,
+    CHARCOAL,
+    ECU_RED,
+    ECU_RED_DARK,
     GOLD,
     GOLD_LIGHT,
     NAVY,
@@ -128,7 +134,7 @@ class MapCanvas(QWidget):
     def __init__(self, background_image_path: str | None = None) -> None:
         super().__init__()
         self.setObjectName("map_canvas")
-        self.setMinimumSize(620, 440)
+        self.setMinimumSize(720, 500)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.background_image_path: str | None = None
@@ -150,6 +156,8 @@ class MapCanvas(QWidget):
         """Set a campus map image path and repaint the canvas."""
         self.background_image_path = path
         image_path = Path(path)
+        if not image_path.is_absolute():
+            image_path = Path(__file__).resolve().parents[3] / image_path
         self._background_pixmap = (
             QPixmap(str(image_path)) if image_path.exists() else QPixmap()
         )
@@ -193,17 +201,17 @@ class MapCanvas(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        canvas_rect = QRectF(self.rect().adjusted(16, 16, -16, -16))
-        painter.setPen(QPen(QColor("#D8D2C5"), 1))
-        painter.setBrush(QColor("#ECE8DC"))
-        painter.drawRoundedRect(canvas_rect, 18, 18)
+        canvas_rect = QRectF(self.rect().adjusted(8, 8, -8, -8))
+        painter.setPen(QPen(QColor(BORDER), 1))
+        painter.setBrush(QColor(WHITE))
+        painter.drawRoundedRect(canvas_rect, 16, 16)
 
         if self._background_pixmap.isNull():
             self._image_target_rect = canvas_rect
             self._draw_missing_image_message(painter, canvas_rect)
-        else:
-            self._draw_background_image(painter, canvas_rect)
+            return
 
+        self._draw_background_image(painter, canvas_rect)
         self._draw_route(painter)
         self._draw_landmark_hotspots(painter)
         self._draw_walker(painter)
@@ -313,7 +321,7 @@ class MapCanvas(QWidget):
         rect = (
             self._image_target_rect
             if self._image_target_rect.isValid()
-            else QRectF(self.rect().adjusted(16, 16, -16, -16))
+            else QRectF(self.rect().adjusted(8, 8, -8, -8))
         )
         return QPointF(
             rect.left() + rect.width() * (x_value / 1000),
@@ -375,8 +383,8 @@ class MapScreen(QWidget):
     def _build_ui(self) -> None:
         """Arrange route controls, map canvas, and info panel."""
         page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(PAGE_PADDING + 8, PAGE_PADDING, PAGE_PADDING + 8, PAGE_PADDING)
-        page_layout.setSpacing(16)
+        page_layout.setContentsMargins(PAGE_PADDING, 24, PAGE_PADDING, PAGE_PADDING)
+        page_layout.setSpacing(14)
 
         self.map_title = QLabel("Campus Map")
         self.map_title.setObjectName("map_title")
@@ -389,74 +397,75 @@ class MapScreen(QWidget):
         page_layout.addWidget(self.map_title)
         page_layout.addWidget(self.map_subtitle)
 
-        search_panel = QFrame()
-        search_panel.setObjectName("map_search_panel")
-        search_layout = QHBoxLayout(search_panel)
-        search_layout.setContentsMargins(16, 14, 16, 14)
-        search_layout.setSpacing(12)
+        controls = QFrame()
+        controls.setObjectName("map_controls_panel")
+        controls_layout = QGridLayout(controls)
+        controls_layout.setContentsMargins(18, 16, 18, 16)
+        controls_layout.setHorizontalSpacing(12)
+        controls_layout.setVerticalSpacing(10)
         self.map_search_input = QLineEdit()
         self.map_search_input.setObjectName("map_search_input")
         self.map_search_input.setPlaceholderText("Search landmarks")
-        self.map_search_input.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.map_search_input.setMinimumHeight(BUTTON_HEIGHT)
         completer = QCompleter(list(self.landmarks.keys()), self.map_search_input)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.map_search_input.setCompleter(completer)
         self.map_search_button = QPushButton("Search")
         self.map_search_button.setObjectName("map_search_button")
-        self.map_search_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.map_search_button.setMinimumHeight(BUTTON_HEIGHT)
         self.map_search_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_search_input.returnPressed.connect(self.search_landmark)
         self.map_search_button.clicked.connect(self.search_landmark)
-        search_layout.addWidget(self.map_search_input, stretch=1)
-        search_layout.addWidget(self.map_search_button)
-        page_layout.addWidget(search_panel)
-
-        controls = QFrame()
-        controls.setObjectName("map_controls_panel")
-        controls_layout = QHBoxLayout(controls)
-        controls_layout.setContentsMargins(16, 14, 16, 14)
-        controls_layout.setSpacing(12)
         self.map_from_combo = QComboBox()
         self.map_from_combo.setObjectName("map_from_combo")
         self.map_to_combo = QComboBox()
         self.map_to_combo.setObjectName("map_to_combo")
         for combo in (self.map_from_combo, self.map_to_combo):
             combo.addItems(self.landmarks.keys())
-            combo.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+            combo.setMinimumHeight(BUTTON_HEIGHT)
         self.map_to_combo.setCurrentText("Cafeteria")
         self.map_find_route_button = QPushButton("Find Route")
         self.map_find_route_button.setObjectName("map_find_route_button")
         self.map_reset_route_button = QPushButton("Reset Route")
         self.map_reset_route_button.setObjectName("map_reset_route_button")
         for button in (self.map_find_route_button, self.map_reset_route_button):
-            button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+            button.setMinimumHeight(BUTTON_HEIGHT)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_find_route_button.clicked.connect(self.find_route)
         self.map_reset_route_button.clicked.connect(self.reset_route)
-        controls_layout.addWidget(QLabel("From"))
-        controls_layout.addWidget(self.map_from_combo, stretch=1)
-        controls_layout.addWidget(QLabel("To"))
-        controls_layout.addWidget(self.map_to_combo, stretch=1)
-        controls_layout.addWidget(self.map_find_route_button)
-        controls_layout.addWidget(self.map_reset_route_button)
+        from_label = QLabel("From")
+        from_label.setObjectName("map_control_label")
+        to_label = QLabel("To")
+        to_label.setObjectName("map_control_label")
+        controls_layout.addWidget(self.map_search_input, 0, 0, 1, 4)
+        controls_layout.addWidget(self.map_search_button, 0, 4)
+        controls_layout.addWidget(from_label, 1, 0)
+        controls_layout.addWidget(self.map_from_combo, 1, 1)
+        controls_layout.addWidget(to_label, 1, 2)
+        controls_layout.addWidget(self.map_to_combo, 1, 3)
+        controls_layout.addWidget(self.map_find_route_button, 1, 4)
+        controls_layout.addWidget(self.map_reset_route_button, 1, 5)
+        controls_layout.setColumnStretch(0, 0)
+        controls_layout.setColumnStretch(1, 2)
+        controls_layout.setColumnStretch(3, 2)
         page_layout.addWidget(controls)
 
         body_layout = QHBoxLayout()
-        body_layout.setSpacing(18)
+        body_layout.setSpacing(16)
         self.map_canvas = MapCanvas(self.map_image_path)
         self.map_canvas.landmark_clicked = self._handle_landmark_click
-        body_layout.addWidget(self.map_canvas, stretch=3)
-        body_layout.addWidget(self._create_info_panel(), stretch=1)
+        body_layout.addWidget(self.map_canvas, stretch=1)
+        body_layout.addWidget(self._create_info_panel())
         page_layout.addLayout(body_layout, stretch=1)
 
     def _create_info_panel(self) -> QFrame:
         """Create the Google Maps-like route info panel."""
         self.map_info_panel = QFrame()
         self.map_info_panel.setObjectName("map_info_panel")
-        self.map_info_panel.setMinimumWidth(300)
+        self.map_info_panel.setFixedWidth(360)
         panel_layout = QVBoxLayout(self.map_info_panel)
-        panel_layout.setContentsMargins(24, 24, 24, 24)
-        panel_layout.setSpacing(12)
+        panel_layout.setContentsMargins(20, 20, 20, 20)
+        panel_layout.setSpacing(10)
         eyebrow = QLabel("Walking Navigation")
         eyebrow.setObjectName("map_info_eyebrow")
         self.map_info_title = QLabel("Select a route")
@@ -470,7 +479,7 @@ class MapScreen(QWidget):
         self.map_selected_place_label.setWordWrap(True)
         self.map_set_destination_button = QPushButton("Set as Destination")
         self.map_set_destination_button.setObjectName("map_set_destination_button")
-        self.map_set_destination_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.map_set_destination_button.setMinimumHeight(BUTTON_HEIGHT)
         self.map_set_destination_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_set_destination_button.setEnabled(False)
         self.map_set_destination_button.clicked.connect(self.set_selected_as_destination)
@@ -485,12 +494,12 @@ class MapScreen(QWidget):
         walk_buttons_layout.setSpacing(8)
         self.map_start_walk_button = QPushButton("Start Walk")
         self.map_start_walk_button.setObjectName("map_start_walk_button")
-        self.map_pause_walk_button = QPushButton("Pause Walk")
+        self.map_pause_walk_button = QPushButton("Pause")
         self.map_pause_walk_button.setObjectName("map_pause_walk_button")
-        self.map_reset_walk_button = QPushButton("Reset Walk")
+        self.map_reset_walk_button = QPushButton("Reset")
         self.map_reset_walk_button.setObjectName("map_reset_walk_button")
         for button in (self.map_start_walk_button, self.map_pause_walk_button, self.map_reset_walk_button):
-            button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+            button.setMinimumHeight(BUTTON_HEIGHT)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             walk_buttons_layout.addWidget(button)
         self.map_start_walk_button.clicked.connect(self.start_walk)
@@ -703,12 +712,12 @@ class MapScreen(QWidget):
             QWidget#map_screen {{
                 background-color: {OFF_WHITE};
                 color: {TEXT_DARK};
-                {font(17)}
+                {font(16)}
             }}
 
             QLabel#map_title {{
-                color: {NAVY};
-                {font(32, 850)}
+                color: {CHARCOAL};
+                {font(30, 850)}
             }}
 
             QLabel#map_subtitle {{
@@ -716,44 +725,50 @@ class MapScreen(QWidget):
                 {font(16, 600)}
             }}
 
-            QFrame#map_search_panel,
             QFrame#map_controls_panel,
             QFrame#map_info_panel {{
                 background-color: {WHITE};
-                border: 1px solid rgba(92, 107, 128, 70);
+                border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS)};
+            }}
+
+            QLabel#map_control_label {{
+                color: {TEXT_MUTED};
+                {font(13, 800)}
             }}
 
             QLineEdit,
             QComboBox {{
-                background-color: {OFF_WHITE};
+                background-color: {WHITE};
                 color: {TEXT_DARK};
-                border: 1px solid rgba(92, 107, 128, 80);
-                border-radius: {px(16)};
-                padding: 0 {px(CARD_PADDING)};
-                {font(15, 750)}
+                border: 1px solid {BORDER};
+                border-radius: {px(14)};
+                padding: 0 {px(14)};
+                min-height: {px(BUTTON_HEIGHT)};
+                {font(14, 750)}
             }}
 
             QLineEdit:focus {{
-                border: 2px solid {GOLD};
+                border: 2px solid {ECU_RED};
             }}
 
             QPushButton {{
-                background-color: {NAVY};
+                background-color: {CHARCOAL};
                 color: {WHITE};
                 border: none;
-                border-radius: {px(16)};
-                padding: 0 {px(18)};
-                {font(15, 800)}
+                border-radius: {px(14)};
+                padding: 0 {px(14)};
+                min-height: {px(BUTTON_HEIGHT)};
+                {font(14, 800)}
             }}
 
             QPushButton:hover {{
-                background-color: {NAVY_LIGHT};
+                background-color: {NAVY_DARK};
             }}
 
             QPushButton:pressed {{
-                background-color: {GOLD_LIGHT};
-                color: {TEXT_DARK};
+                background-color: {ECU_RED_DARK};
+                color: {WHITE};
             }}
 
             QPushButton:disabled {{
@@ -762,19 +777,19 @@ class MapScreen(QWidget):
             }}
 
             QWidget#map_canvas {{
-                background-color: #ECE8DC;
-                border: 1px solid rgba(92, 107, 128, 70);
-                border-radius: {px(CARD_RADIUS + 4)};
+                background-color: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: {px(CARD_RADIUS)};
             }}
 
             QLabel#map_info_eyebrow {{
-                color: {GOLD};
+                color: {ECU_RED};
                 {font(12, 850)}
             }}
 
             QLabel#map_info_title {{
-                color: {NAVY_DARK};
-                {font(24, 850)}
+                color: {CHARCOAL};
+                {font(22, 850)}
             }}
 
             QLabel#map_route_info_label {{
@@ -785,27 +800,27 @@ class MapScreen(QWidget):
             QLabel#map_selected_place_label {{
                 color: {TEXT_DARK};
                 background-color: {OFF_WHITE};
-                border: 1px solid rgba(92, 107, 128, 45);
+                border: 1px solid {BORDER};
                 border-radius: {px(14)};
                 padding: {px(12)};
                 {font(14, 650)}
             }}
 
             QLabel#map_route_steps_label {{
-                color: {NAVY_DARK};
-                background-color: rgba(215, 169, 75, 34);
+                color: {TEXT_DARK};
+                background-color: #FFF7F7;
                 border-radius: {px(14)};
                 padding: {px(12)};
-                {font(14, 700)}
+                {font(13, 700)}
             }}
 
             QLabel#map_walk_status_label {{
-                color: {NAVY_DARK};
+                color: {TEXT_DARK};
                 background-color: {WHITE};
-                border: 1px solid rgba(215, 169, 75, 90);
+                border: 1px solid rgba(215, 25, 32, 90);
                 border-radius: {px(14)};
                 padding: {px(10)};
-                {font(14, 800)}
+                {font(13, 800)}
             }}
             """
         )

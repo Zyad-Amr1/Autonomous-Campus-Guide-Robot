@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from ui.public.theme import (
     BORDER,
+    BUTTON_HEIGHT,
     CARD_PADDING,
     CARD_RADIUS,
     CHARCOAL,
@@ -74,11 +75,11 @@ class AdminGateScreen(QWidget):
         self.admin_password_input.setObjectName("admin_password_input")
         self.admin_password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.admin_password_input.setPlaceholderText("Password")
-        self.admin_password_input.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.admin_password_input.setMinimumHeight(BUTTON_HEIGHT)
 
         self.admin_unlock_button = QPushButton("Unlock")
         self.admin_unlock_button.setObjectName("admin_unlock_button")
-        self.admin_unlock_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.admin_unlock_button.setMinimumHeight(BUTTON_HEIGHT)
         self.admin_unlock_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.admin_unlock_button.clicked.connect(self.validate_password)
 
@@ -145,6 +146,7 @@ class AdminGateScreen(QWidget):
                 border: 1px solid {BORDER};
                 border-radius: {px(18)};
                 padding: 0 {px(CARD_PADDING)};
+                min-height: {px(BUTTON_HEIGHT)};
                 {font(17, 650)}
             }}
 
@@ -158,6 +160,7 @@ class AdminGateScreen(QWidget):
                 border: none;
                 border-radius: {px(18)};
                 padding: 0 {px(CARD_PADDING)};
+                min-height: {px(BUTTON_HEIGHT)};
                 {font(18, 800)}
             }}
 

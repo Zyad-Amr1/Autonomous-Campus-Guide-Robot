@@ -64,6 +64,7 @@ from database.repositories.room_repository import (
 )
 from ui.public.theme import (
     BORDER,
+    BUTTON_HEIGHT,
     CARD_PADDING,
     CARD_RADIUS,
     CHARCOAL,
@@ -198,8 +199,8 @@ class DataDashboardScreen(QWidget):
     def _build_ui(self) -> None:
         """Build selector, action buttons, status, and editable table."""
         page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(PAGE_PADDING + 8, PAGE_PADDING, PAGE_PADDING + 8, PAGE_PADDING)
-        page_layout.setSpacing(16)
+        page_layout.setContentsMargins(PAGE_PADDING, 24, PAGE_PADDING, PAGE_PADDING)
+        page_layout.setSpacing(14)
 
         title = QLabel("Data Management")
         title.setObjectName("data_dashboard_title")
@@ -212,8 +213,8 @@ class DataDashboardScreen(QWidget):
         toolbar = QFrame()
         toolbar.setObjectName("data_toolbar")
         toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(18, 16, 18, 16)
-        toolbar_layout.setSpacing(12)
+        toolbar_layout.setContentsMargins(16, 14, 16, 14)
+        toolbar_layout.setSpacing(10)
 
         self.data_dataset_selector = QComboBox()
         self.data_dataset_selector.setObjectName("data_dataset_selector")
@@ -236,7 +237,7 @@ class DataDashboardScreen(QWidget):
             self.data_export_csv_button,
             self.data_save_edits_button,
         ):
-            button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+            button.setMinimumHeight(BUTTON_HEIGHT)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             toolbar_layout.addWidget(button)
 
@@ -519,8 +520,8 @@ class DataDashboardScreen(QWidget):
                 border: 1px solid {BORDER};
                 border-radius: {px(16)};
                 padding: 0 {px(CARD_PADDING)};
-                min-height: {px(TOUCH_BUTTON_HEIGHT)};
-                {font(16, 750)}
+                min-height: {px(BUTTON_HEIGHT)};
+                {font(14, 750)}
             }}
 
             QPushButton {{
@@ -529,7 +530,8 @@ class DataDashboardScreen(QWidget):
                 border: none;
                 border-radius: {px(16)};
                 padding: 0 {px(16)};
-                {font(14, 800)}
+                min-height: {px(BUTTON_HEIGHT)};
+                {font(13, 800)}
             }}
 
             QPushButton:hover {{

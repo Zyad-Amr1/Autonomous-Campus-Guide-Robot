@@ -30,11 +30,13 @@ SMALL_FONT_SIZE = 14
 BUTTON_FONT_SIZE = 17
 
 TOUCH_BUTTON_HEIGHT = 60
-CARD_RADIUS = 24
+BUTTON_HEIGHT = 52
+HEADER_HEIGHT = 72
+CARD_RADIUS = 18
 BUTTON_RADIUS = 16
-PAGE_PADDING = 30
-CARD_PADDING = 22
-SIDEBAR_WIDTH = 218
+PAGE_PADDING = 32
+CARD_PADDING = 20
+SIDEBAR_WIDTH = 220
 
 
 def px(value: int) -> str:
@@ -53,6 +55,11 @@ def font(size: int, weight: int | None = None) -> str:
 def min_touch_height() -> str:
     """Return the minimum control height used by touch interactions."""
     return f"min-height: {px(TOUCH_BUTTON_HEIGHT)};"
+
+
+def compact_height() -> str:
+    """Return compact button/input height for dense kiosk toolbars."""
+    return f"min-height: {px(BUTTON_HEIGHT)}; max-height: {px(BUTTON_HEIGHT)};"
 
 
 APP_BACKGROUND_STYLE = f"""
@@ -90,11 +97,11 @@ QPushButton {{
     color: #D1D5DB;
     border: none;
     border-left: 4px solid transparent;
-    border-radius: {px(14)};
-    padding: 0 {px(16)};
+    border-radius: {px(10)};
+    padding: 0 {px(14)};
     text-align: left;
-    {font(15, 700)}
-    {min_touch_height()}
+    {font(14, 700)}
+    {compact_height()}
 }}
 QPushButton:hover {{
     background-color: rgba(255, 255, 255, 18);
@@ -107,15 +114,48 @@ QPushButton:checked {{
 }}
 """.strip()
 
+APP_HEADER_STYLE = f"""
+QFrame {{
+    background-color: {WHITE};
+    border-bottom: 1px solid {BORDER};
+}}
+""".strip()
+
+PAGE_TITLE_STYLE = f"""
+QLabel {{
+    color: {TEXT_DARK};
+    {font(30, 850)}
+}}
+""".strip()
+
+COMPACT_BUTTON_STYLE = f"""
+QPushButton {{
+    background-color: {WHITE};
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER};
+    border-radius: {px(14)};
+    padding: 0 {px(16)};
+    {font(14, 800)}
+    {compact_height()}
+}}
+QPushButton:hover {{
+    border-color: {ECU_RED};
+    background-color: #FFF9F9;
+}}
+QPushButton:pressed {{
+    background-color: {GOLD_LIGHT};
+}}
+""".strip()
+
 PRIMARY_BUTTON_STYLE = f"""
 QPushButton {{
     background-color: {ECU_RED};
     color: {WHITE};
     border: none;
     border-radius: {px(BUTTON_RADIUS)};
-    padding: 0 {px(CARD_PADDING)};
-    {font(BUTTON_FONT_SIZE, 800)}
-    {min_touch_height()}
+    padding: 0 {px(18)};
+    {font(15, 800)}
+    {compact_height()}
 }}
 QPushButton:hover {{
     background-color: {ECU_RED_DARK};
@@ -132,9 +172,9 @@ QPushButton {{
     color: {TEXT_DARK};
     border: 1px solid {BORDER};
     border-radius: {px(BUTTON_RADIUS)};
-    padding: 0 {px(CARD_PADDING)};
-    {font(BUTTON_FONT_SIZE, 750)}
-    {min_touch_height()}
+    padding: 0 {px(18)};
+    {font(15, 750)}
+    {compact_height()}
 }}
 QPushButton:hover {{
     border-color: {ECU_RED};
@@ -186,7 +226,7 @@ QComboBox {{
     border-radius: {px(16)};
     padding: 0 {px(CARD_PADDING)};
     {font(15, 700)}
-    {min_touch_height()}
+    {compact_height()}
 }}
 QLineEdit:focus,
 QComboBox:focus {{

@@ -21,13 +21,19 @@ from ui.public.screens.map_screen import MapScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
     APP_BACKGROUND_STYLE,
+    APP_HEADER_STYLE,
     BORDER,
+    BUTTON_HEIGHT,
+    CHARCOAL,
+    COMPACT_BUTTON_STYLE,
     EMERGENCY_BUTTON_STYLE,
     FLOATING_CHAT_BUTTON_STYLE,
+    HEADER_HEIGHT,
     OFF_WHITE,
     SIDEBAR_BUTTON_STYLE,
     SIDEBAR_STYLE,
     SIDEBAR_WIDTH,
+    TEXT_MUTED,
     TOUCH_BUTTON_HEIGHT,
     WHITE,
     font,
@@ -137,16 +143,6 @@ class PublicMainWindow(QMainWindow):
             setattr(self, object_name, button)
             sidebar_layout.addWidget(button)
 
-        self.language_toggle_button = QPushButton()
-        self.language_toggle_button.setObjectName("language_toggle_button")
-        self.language_toggle_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
-        self.language_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.language_toggle_button.setStyleSheet(SIDEBAR_BUTTON_STYLE)
-        self.language_toggle_button.clicked.connect(
-            lambda checked=False: self.toggle_language()
-        )
-        sidebar_layout.addWidget(self.language_toggle_button)
-
         sidebar_layout.addStretch()
         footer = QLabel("Egyptian Chinese University")
         footer.setObjectName("public_sidebar_footer")
@@ -172,6 +168,7 @@ class PublicMainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
+        content_layout.addWidget(self._create_header())
         self.public_page_stack = self._create_page_stack()
         content_layout.addWidget(self.public_page_stack, stretch=1)
 
@@ -181,7 +178,7 @@ class PublicMainWindow(QMainWindow):
         floating_row.addStretch()
         self.emergency_help_button = QPushButton("Help")
         self.emergency_help_button.setObjectName("emergency_help_button")
-        self.emergency_help_button.setMinimumSize(120, TOUCH_BUTTON_HEIGHT)
+        self.emergency_help_button.setMinimumSize(112, BUTTON_HEIGHT)
         self.emergency_help_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.emergency_help_button.setStyleSheet(
             EMERGENCY_BUTTON_STYLE
@@ -200,7 +197,7 @@ class PublicMainWindow(QMainWindow):
 
         self.floating_ask_button = QPushButton()
         self.floating_ask_button.setObjectName("floating_ask_button")
-        self.floating_ask_button.setMinimumSize(150, TOUCH_BUTTON_HEIGHT)
+        self.floating_ask_button.setMinimumSize(142, BUTTON_HEIGHT)
         self.floating_ask_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.floating_ask_button.setStyleSheet(
             FLOATING_CHAT_BUTTON_STYLE
@@ -218,6 +215,49 @@ class PublicMainWindow(QMainWindow):
         floating_row.addWidget(self.floating_ask_button)
         content_layout.addLayout(floating_row)
         return content
+
+    def _create_header(self) -> QFrame:
+        """Create the compact app header above the page stack."""
+        header = QFrame()
+        header.setObjectName("public_shell_header")
+        header.setFixedHeight(HEADER_HEIGHT)
+        header.setStyleSheet(
+            APP_HEADER_STYLE.replace("QFrame {", "QFrame#public_shell_header {", 1)
+        )
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(26, 10, 26, 10)
+        header_layout.setSpacing(12)
+
+        self.header_title_label = QLabel("ECU Smart Assistant")
+        self.header_title_label.setObjectName("public_header_title")
+        self.header_title_label.setStyleSheet(f"color: {CHARCOAL}; {font(20, 850)}")
+        self.header_subtitle_label = QLabel("Touchscreen campus guidance")
+        self.header_subtitle_label.setObjectName("public_header_subtitle")
+        self.header_subtitle_label.setStyleSheet(f"color: {TEXT_MUTED}; {font(12, 650)}")
+
+        title_group = QVBoxLayout()
+        title_group.setSpacing(0)
+        title_group.addWidget(self.header_title_label)
+        title_group.addWidget(self.header_subtitle_label)
+        header_layout.addLayout(title_group)
+        header_layout.addStretch()
+
+        self.header_home_button = QPushButton("Home")
+        self.header_home_button.setObjectName("public_header_home_button")
+        self.header_home_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header_home_button.setStyleSheet(COMPACT_BUTTON_STYLE)
+        self.header_home_button.clicked.connect(lambda checked=False: self.show_home())
+        header_layout.addWidget(self.header_home_button)
+
+        self.language_toggle_button = QPushButton()
+        self.language_toggle_button.setObjectName("language_toggle_button")
+        self.language_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.language_toggle_button.setStyleSheet(COMPACT_BUTTON_STYLE)
+        self.language_toggle_button.clicked.connect(
+            lambda checked=False: self.toggle_language()
+        )
+        header_layout.addWidget(self.language_toggle_button)
+        return header
 
     def _create_page_stack(self) -> QStackedWidget:
         """Create exactly seven themed blank placeholder pages."""
@@ -288,12 +328,7 @@ class PublicMainWindow(QMainWindow):
             )
 
         self.language_toggle_button.setLayoutDirection(direction)
-        self.language_toggle_button.setStyleSheet(
-            SIDEBAR_BUTTON_STYLE.replace(
-                "text-align: left;",
-                f"text-align: {sidebar_alignment};",
-            )
-        )
+        self.language_toggle_button.setStyleSheet(COMPACT_BUTTON_STYLE)
 
         for key, page in self.placeholder_pages.items():
             page.setLayoutDirection(direction)

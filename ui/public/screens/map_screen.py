@@ -46,8 +46,8 @@ LANDMARKS = {
     "Stadium": (840, 230),
     "Workshop 1": (95, 675),
     "Workshop 2": (285, 280),
-    "Boys' Musallah": (760, 585),
-    "Girls' Musallah": (790, 420),
+    "Boys’ Musallah": (760, 585),
+    "Girls’ Musallah": (790, 420),
     "Sports Activity": (775, 510),
 }
 
@@ -65,13 +65,13 @@ WALKING_GRAPH = {
         "Cafeteria",
         "Building D",
         "Building B",
-        "Girls' Musallah",
+        "Girls’ Musallah",
         "Sports Activity",
     ),
-    "Girls' Musallah": ("Building A", "Stadium", "Sports Activity"),
-    "Sports Activity": ("Building A", "Girls' Musallah", "Boys' Musallah"),
-    "Boys' Musallah": ("Sports Activity", "Stadium"),
-    "Stadium": ("Parking", "Girls' Musallah", "Boys' Musallah"),
+    "Girls’ Musallah": ("Building A", "Stadium", "Sports Activity"),
+    "Sports Activity": ("Building A", "Girls’ Musallah", "Boys’ Musallah"),
+    "Boys’ Musallah": ("Sports Activity", "Stadium"),
+    "Stadium": ("Parking", "Girls’ Musallah", "Boys’ Musallah"),
 }
 
 

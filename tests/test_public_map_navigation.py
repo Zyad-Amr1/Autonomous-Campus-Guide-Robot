@@ -4,7 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QComboBox, QPushButton
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QPushButton
 
 from ui.public.screens.map_screen import MapScreen
 
@@ -49,6 +49,17 @@ def test_route_buttons_exist() -> None:
         screen.close()
 
 
+def test_search_input_exists() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        assert screen.findChild(QLineEdit, "map_search_input") is not None
+        assert screen.findChild(QPushButton, "map_search_button") is not None
+    finally:
+        screen.close()
+
+
 def test_landmarks_include_key_places() -> None:
     application = _get_application()
     screen = MapScreen()
@@ -56,6 +67,45 @@ def test_landmarks_include_key_places() -> None:
         assert application is not None
         for landmark in ("Building A", "Building B", "Cafeteria", "Parking", "Stadium"):
             assert landmark in screen.landmarks
+    finally:
+        screen.close()
+
+
+def test_searching_cafeteria_selects_and_highlights_landmark() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_search_input.setText("Cafeteria")
+        screen.search_landmark()
+        assert screen.selected_landmark == "Cafeteria"
+        assert screen.map_canvas.selected_landmark == "Cafeteria"
+        assert screen.map_info_title.text() == "Cafeteria"
+    finally:
+        screen.close()
+
+
+def test_selecting_marker_updates_selected_landmark() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_canvas.landmark_clicked("Parking")
+        assert screen.selected_landmark == "Parking"
+        assert screen.map_canvas.selected_landmark == "Parking"
+        assert "Type/category:" in screen.map_selected_place_label.text()
+    finally:
+        screen.close()
+
+
+def test_set_as_destination_updates_to_combo() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.select_landmark("Stadium")
+        screen.set_selected_as_destination()
+        assert screen.map_to_combo.currentText() == "Stadium"
     finally:
         screen.close()
 
@@ -90,6 +140,22 @@ def test_find_route_updates_current_route() -> None:
         screen.close()
 
 
+def test_route_steps_are_generated_after_finding_route() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        steps = screen.findChild(QLabel, "map_route_steps_label")
+        assert steps is not None
+        assert "Start at Building A" in steps.text()
+        assert "Arrive at Cafeteria" in steps.text()
+    finally:
+        screen.close()
+
+
 def test_reset_clears_current_route() -> None:
     application = _get_application()
     screen = MapScreen()
@@ -101,6 +167,7 @@ def test_reset_clears_current_route() -> None:
         screen.reset_route()
         assert screen.current_route == []
         assert screen.map_canvas.current_route == []
+        assert screen.map_route_steps_label.text() == ""
     finally:
         screen.close()
 

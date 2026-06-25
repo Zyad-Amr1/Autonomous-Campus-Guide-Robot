@@ -6,10 +6,12 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QCompleter,
     QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -49,6 +51,69 @@ LANDMARKS = {
     "Boys’ Musallah": (760, 585),
     "Girls’ Musallah": (790, 420),
     "Sports Activity": (775, 510),
+}
+
+LANDMARK_DETAILS = {
+    "Building A": (
+        "Academic Building",
+        "Main academic block near the central campus path.",
+    ),
+    "Building B": (
+        "Academic Building",
+        "Teaching building connected to the southern walkway.",
+    ),
+    "Building C": (
+        "Academic Building",
+        "Classroom building beside the west campus route.",
+    ),
+    "Building D": (
+        "Academic Building",
+        "Academic block close to the cafeteria connector path.",
+    ),
+    "Building E": (
+        "Academic Building",
+        "Northern academic building near the main parking approach.",
+    ),
+    "Cafeteria": (
+        "Student Services",
+        "Food and student break area in the middle of campus.",
+    ),
+    "Parking": (
+        "Campus Access",
+        "Main parking area and common starting point for visitors.",
+    ),
+    "Stadium": (
+        "Sports",
+        "Outdoor sports venue on the east side of campus.",
+    ),
+    "Workshop 1": (
+        "Workshop",
+        "Hands-on workshop area near the west side buildings.",
+    ),
+    "Workshop 2": (
+        "Workshop",
+        "Workshop space connected to the cafeteria route.",
+    ),
+    "Boys’ Musallah": (
+        "Prayer Area",
+        "Prayer space for boys near the eastern campus path.",
+    ),
+    "Girls’ Musallah": (
+        "Prayer Area",
+        "Prayer space for girls near the sports activity area.",
+    ),
+    "Boysâ€™ Musallah": (
+        "Prayer Area",
+        "Prayer space for boys near the eastern campus path.",
+    ),
+    "Girlsâ€™ Musallah": (
+        "Prayer Area",
+        "Prayer space for girls near the sports activity area.",
+    ),
+    "Sports Activity": (
+        "Sports",
+        "Student sports activity area beside the east walkway.",
+    ),
 }
 
 WALKING_GRAPH = {
@@ -134,6 +199,18 @@ class MapCanvas(QWidget):
         self.route_destination = None
         self.update()
 
+    def select_landmark(self, landmark: str) -> None:
+        """Highlight a landmark marker on the canvas."""
+        if landmark not in self.landmarks:
+            return
+        self.selected_landmark = landmark
+        self.update()
+
+    def clear_selection(self) -> None:
+        """Clear the selected landmark marker highlight."""
+        self.selected_landmark = None
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         """Paint the map image, route, and hardcoded landmarks."""
         super().paintEvent(event)
@@ -163,10 +240,9 @@ class MapCanvas(QWidget):
                 delta.x() * delta.x() + delta.y() * delta.y()
                 <= self._marker_hit_radius * self._marker_hit_radius
             ):
-                self.selected_landmark = name
+                self.select_landmark(name)
                 if self.landmark_clicked is not None:
                     self.landmark_clicked(name)
-                self.update()
                 return
         super().mousePressEvent(event)
 
@@ -282,6 +358,7 @@ class MapScreen(QWidget):
         self.landmarks = LANDMARKS.copy()
         self.walking_graph = {key: tuple(value) for key, value in WALKING_GRAPH.items()}
         self.current_route: list[str] = []
+        self.selected_landmark: str | None = None
         self.setObjectName("map_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
@@ -303,6 +380,31 @@ class MapScreen(QWidget):
         self.placeholder_title_label.hide()
         page_layout.addWidget(self.map_title)
         page_layout.addWidget(self.map_subtitle)
+
+        search_panel = QFrame()
+        search_panel.setObjectName("map_search_panel")
+        search_layout = QHBoxLayout(search_panel)
+        search_layout.setContentsMargins(16, 14, 16, 14)
+        search_layout.setSpacing(12)
+
+        self.map_search_input = QLineEdit()
+        self.map_search_input.setObjectName("map_search_input")
+        self.map_search_input.setPlaceholderText("Search landmarks")
+        self.map_search_input.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        completer = QCompleter(list(self.landmarks.keys()), self.map_search_input)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.map_search_input.setCompleter(completer)
+
+        self.map_search_button = QPushButton("Search")
+        self.map_search_button.setObjectName("map_search_button")
+        self.map_search_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.map_search_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.map_search_input.returnPressed.connect(self.search_landmark)
+        self.map_search_button.clicked.connect(self.search_landmark)
+
+        search_layout.addWidget(self.map_search_input, stretch=1)
+        search_layout.addWidget(self.map_search_button)
+        page_layout.addWidget(search_panel)
 
         controls = QFrame()
         controls.setObjectName("map_controls_panel")
@@ -363,12 +465,76 @@ class MapScreen(QWidget):
         self.map_route_info_label.setObjectName("map_route_info_label")
         self.map_route_info_label.setWordWrap(True)
         self.map_info_details = self.map_route_info_label
+        self.map_selected_place_label = QLabel("No place selected.")
+        self.map_selected_place_label.setObjectName("map_selected_place_label")
+        self.map_selected_place_label.setWordWrap(True)
+        self.map_set_destination_button = QPushButton("Set as Destination")
+        self.map_set_destination_button.setObjectName("map_set_destination_button")
+        self.map_set_destination_button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.map_set_destination_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.map_set_destination_button.setEnabled(False)
+        self.map_set_destination_button.clicked.connect(self.set_selected_as_destination)
+        self.map_route_steps_label = QLabel("")
+        self.map_route_steps_label.setObjectName("map_route_steps_label")
+        self.map_route_steps_label.setWordWrap(True)
 
         panel_layout.addWidget(eyebrow)
         panel_layout.addWidget(self.map_info_title)
         panel_layout.addWidget(self.map_route_info_label)
+        panel_layout.addWidget(self.map_selected_place_label)
+        panel_layout.addWidget(self.map_set_destination_button)
+        panel_layout.addWidget(self.map_route_steps_label)
         panel_layout.addStretch()
         return self.map_info_panel
+
+    def search_landmark(self) -> None:
+        """Search for a landmark by name and select the best match."""
+        query = self.map_search_input.text().strip()
+        if not query:
+            self.map_info_title.setText("Search campus")
+            self.map_route_info_label.setText("Type a landmark name to highlight it on the map.")
+            return
+
+        exact_match = next(
+            (name for name in self.landmarks if name.casefold() == query.casefold()),
+            None,
+        )
+        partial_match = next(
+            (name for name in self.landmarks if query.casefold() in name.casefold()),
+            None,
+        )
+        match = exact_match or partial_match
+        if match is None:
+            self.map_info_title.setText("No landmark found")
+            self.map_route_info_label.setText("Try searching for a building, cafeteria, parking, or stadium.")
+            return
+
+        self.select_landmark(match)
+        self.map_search_input.setText(match)
+
+    def select_landmark(self, landmark: str) -> None:
+        """Select a landmark and show its details in the info panel."""
+        if landmark not in self.landmarks:
+            return
+        self.selected_landmark = landmark
+        self.map_canvas.select_landmark(landmark)
+        category, description = LANDMARK_DETAILS.get(
+            landmark,
+            ("Campus Landmark", "Campus place on the walking map."),
+        )
+        self.map_info_title.setText(landmark)
+        self.map_route_info_label.setText("Selected landmark")
+        self.map_selected_place_label.setText(
+            f"Type/category: {category}\n"
+            f"{description}"
+        )
+        self.map_set_destination_button.setEnabled(True)
+
+    def set_selected_as_destination(self) -> None:
+        """Use the selected landmark as the route destination."""
+        if self.selected_landmark is None:
+            return
+        self.map_to_combo.setCurrentText(self.selected_landmark)
 
     def shortest_path(self, start: str, destination: str) -> list[str]:
         """Return a Dijkstra shortest path between two landmarks."""
@@ -405,6 +571,7 @@ class MapScreen(QWidget):
             self.map_canvas.clear_route()
             self.map_info_title.setText("Same location selected")
             self.map_route_info_label.setText("Choose two different places to create a route.")
+            self.map_route_steps_label.setText("")
             return
 
         route = self.shortest_path(start, destination)
@@ -413,6 +580,7 @@ class MapScreen(QWidget):
             self.map_canvas.clear_route()
             self.map_info_title.setText("No route found")
             self.map_route_info_label.setText("Try another start or destination.")
+            self.map_route_steps_label.setText("")
             return
 
         self.current_route = route
@@ -423,6 +591,7 @@ class MapScreen(QWidget):
             f"Route: {start} → {destination}\n"
             f"Estimated walking time: {minutes} min"
         )
+        self.map_route_steps_label.setText("\n".join(self._route_steps(route)))
 
     def reset_route(self) -> None:
         """Clear the active walking route."""
@@ -430,11 +599,11 @@ class MapScreen(QWidget):
         self.map_canvas.clear_route()
         self.map_info_title.setText("Select a route")
         self.map_route_info_label.setText("Choose a start and destination, then tap Find Route.")
+        self.map_route_steps_label.setText("")
 
     def _handle_landmark_click(self, landmark: str) -> None:
         """Show clicked landmark context in the route info panel."""
-        self.map_info_title.setText(landmark)
-        self.map_route_info_label.setText("Use this place as your start or destination from the route controls.")
+        self.select_landmark(landmark)
 
     def _distance(self, first: str, second: str) -> float:
         """Return Euclidean distance between two normalized landmarks."""
@@ -448,6 +617,19 @@ class MapScreen(QWidget):
             self._distance(route[index], route[index + 1])
             for index in range(len(route) - 1)
         )
+
+    def _route_steps(self, route: list[str]) -> list[str]:
+        """Create simple walking instructions for the selected route."""
+        if not route:
+            return []
+        if len(route) == 1:
+            return [f"Start at {route[0]}"]
+
+        steps = [f"Start at {route[0]}", "Walk through central path"]
+        for landmark in route[1:-1]:
+            steps.append(f"Continue toward {landmark}")
+        steps.append(f"Arrive at {route[-1]}")
+        return steps
 
     def _apply_styles(self) -> None:
         """Apply ECU public dashboard styling to the navigation map screen."""
@@ -469,11 +651,25 @@ class MapScreen(QWidget):
                 {font(16, 600)}
             }}
 
+            QFrame#map_search_panel,
             QFrame#map_controls_panel,
             QFrame#map_info_panel {{
                 background-color: {WHITE};
                 border: 1px solid rgba(92, 107, 128, 70);
                 border-radius: {px(CARD_RADIUS)};
+            }}
+
+            QLineEdit {{
+                background-color: {OFF_WHITE};
+                color: {TEXT_DARK};
+                border: 1px solid rgba(92, 107, 128, 80);
+                border-radius: {px(16)};
+                padding: 0 {px(CARD_PADDING)};
+                {font(15, 750)}
+            }}
+
+            QLineEdit:focus {{
+                border: 2px solid {GOLD};
             }}
 
             QComboBox {{
@@ -503,6 +699,11 @@ class MapScreen(QWidget):
                 color: {TEXT_DARK};
             }}
 
+            QPushButton:disabled {{
+                background-color: rgba(92, 107, 128, 55);
+                color: rgba(34, 43, 55, 130);
+            }}
+
             QWidget#map_canvas {{
                 background-color: #ECE8DC;
                 border: 1px solid rgba(92, 107, 128, 70);
@@ -522,6 +723,23 @@ class MapScreen(QWidget):
             QLabel#map_route_info_label {{
                 color: {TEXT_MUTED};
                 {font(15, 650)}
+            }}
+
+            QLabel#map_selected_place_label {{
+                color: {TEXT_DARK};
+                background-color: {OFF_WHITE};
+                border: 1px solid rgba(92, 107, 128, 45);
+                border-radius: {px(14)};
+                padding: {px(12)};
+                {font(14, 650)}
+            }}
+
+            QLabel#map_route_steps_label {{
+                color: {NAVY_DARK};
+                background-color: rgba(215, 169, 75, 34);
+                border-radius: {px(14)};
+                padding: {px(12)};
+                {font(14, 700)}
             }}
             """
         )

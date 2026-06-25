@@ -202,13 +202,15 @@ class DataDashboardScreen(QWidget):
         page_layout.setContentsMargins(PAGE_PADDING, 24, PAGE_PADDING, PAGE_PADDING)
         page_layout.setSpacing(14)
 
-        title = QLabel("Data Management")
-        title.setObjectName("data_dashboard_title")
-        subtitle = QLabel("Manage university data using CSV files and table editing.")
-        subtitle.setObjectName("data_dashboard_subtitle")
-        subtitle.setWordWrap(True)
-        page_layout.addWidget(title)
-        page_layout.addWidget(subtitle)
+        self.data_dashboard_title = QLabel("Data Management")
+        self.data_dashboard_title.setObjectName("data_dashboard_title")
+        self.data_dashboard_subtitle = QLabel(
+            "Manage university data using CSV files and table editing."
+        )
+        self.data_dashboard_subtitle.setObjectName("data_dashboard_subtitle")
+        self.data_dashboard_subtitle.setWordWrap(True)
+        page_layout.addWidget(self.data_dashboard_title)
+        page_layout.addWidget(self.data_dashboard_subtitle)
 
         toolbar = QFrame()
         toolbar.setObjectName("data_toolbar")
@@ -564,3 +566,12 @@ class DataDashboardScreen(QWidget):
             }}
             """
         )
+
+    def update_language(self, translations: dict[str, str]) -> None:
+        """Refresh visible data dashboard controls."""
+        self.data_dashboard_title.setText(translations["data_dashboard_title"])
+        self.data_dashboard_subtitle.setText(translations["data_dashboard_subtitle"])
+        self.data_upload_csv_button.setText(translations["data_upload_csv"])
+        self.data_delete_row_button.setText(translations["data_delete_row"])
+        self.data_export_csv_button.setText(translations["data_export_csv"])
+        self.data_save_edits_button.setText(translations["data_save_edits"])

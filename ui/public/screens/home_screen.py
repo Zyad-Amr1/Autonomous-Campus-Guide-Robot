@@ -351,3 +351,23 @@ class HomeScreen(QWidget):
             }}
             """
         )
+
+    def update_language(self, translations: dict[str, str]) -> None:
+        """Refresh all visible home screen copy for the selected language."""
+        self.home_brand_label.setText(translations["home_brand"])
+        self.home_brand_subtitle.setText(translations["home_brand_subtitle"])
+        self.home_header_badge.setText(translations["home_badge"])
+        self.home_welcome_title.setText(translations["home_hero_title"])
+        self.home_welcome_subtitle.setText(translations["home_hero_subtitle"])
+        self.home_explore_title.setText(translations["home_main_actions"])
+        self.home_secondary_title.setText(translations["home_more_services"])
+        self.quick_ask_title.setText(translations["home_quick_ask"])
+        self.home_map_tile.setText(translations["home_tile_map"])
+        self.home_chat_tile.setText(translations["home_tile_chat"])
+        self.home_about_tile.setText(translations["home_tile_about"])
+        self.home_staff_tile.setText(translations["home_tile_staff"])
+        self.home_schedule_tile.setText(translations["home_tile_schedule"])
+        self.home_news_tile.setText(translations["home_tile_news"])
+        self.home_info_tile.setText(translations["home_tile_data"])
+        for index, chip in enumerate(self.quick_ask_chips, start=1):
+            chip.setText(translations[f"quick_ask_{index}"])

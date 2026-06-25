@@ -375,6 +375,7 @@ class MapScreen(QWidget):
         self.walk_timer = QTimer(self)
         self.walk_timer.setInterval(120)
         self.walk_timer.timeout.connect(self._advance_walk)
+        self._translations: dict[str, str] = {}
         self.setObjectName("map_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
@@ -433,15 +434,15 @@ class MapScreen(QWidget):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_find_route_button.clicked.connect(self.find_route)
         self.map_reset_route_button.clicked.connect(self.reset_route)
-        from_label = QLabel("From")
-        from_label.setObjectName("map_control_label")
-        to_label = QLabel("To")
-        to_label.setObjectName("map_control_label")
+        self.map_from_label = QLabel("From")
+        self.map_from_label.setObjectName("map_control_label")
+        self.map_to_label = QLabel("To")
+        self.map_to_label.setObjectName("map_control_label")
         controls_layout.addWidget(self.map_search_input, 0, 0, 1, 4)
         controls_layout.addWidget(self.map_search_button, 0, 4)
-        controls_layout.addWidget(from_label, 1, 0)
+        controls_layout.addWidget(self.map_from_label, 1, 0)
         controls_layout.addWidget(self.map_from_combo, 1, 1)
-        controls_layout.addWidget(to_label, 1, 2)
+        controls_layout.addWidget(self.map_to_label, 1, 2)
         controls_layout.addWidget(self.map_to_combo, 1, 3)
         controls_layout.addWidget(self.map_find_route_button, 1, 4)
         controls_layout.addWidget(self.map_reset_route_button, 1, 5)
@@ -467,7 +468,8 @@ class MapScreen(QWidget):
         panel_layout.setContentsMargins(20, 20, 20, 20)
         panel_layout.setSpacing(10)
         eyebrow = QLabel("Walking Navigation")
-        eyebrow.setObjectName("map_info_eyebrow")
+        self.map_info_eyebrow = eyebrow
+        self.map_info_eyebrow.setObjectName("map_info_eyebrow")
         self.map_info_title = QLabel("Select a route")
         self.map_info_title.setObjectName("map_info_title")
         self.map_route_info_label = QLabel("Choose a start and destination, then tap Find Route.")
@@ -521,15 +523,24 @@ class MapScreen(QWidget):
         """Search for a landmark by name and select the best match."""
         query = self.map_search_input.text().strip()
         if not query:
-            self.map_info_title.setText("Search campus")
-            self.map_route_info_label.setText("Type a landmark name to highlight it on the map.")
+            self.map_info_title.setText(self._t("map_search_title", "Search campus"))
+            self.map_route_info_label.setText(
+                self._t("map_search_empty", "Type a landmark name to highlight it on the map.")
+            )
             return
         exact_match = next((name for name in self.landmarks if name.casefold() == query.casefold()), None)
         partial_match = next((name for name in self.landmarks if query.casefold() in name.casefold()), None)
         match = exact_match or partial_match
         if match is None:
-            self.map_info_title.setText("No landmark found")
-            self.map_route_info_label.setText("Try searching for a building, cafeteria, parking, or stadium.")
+            self.map_info_title.setText(
+                self._t("map_search_not_found_title", "No landmark found")
+            )
+            self.map_route_info_label.setText(
+                self._t(
+                    "map_search_not_found",
+                    "Try searching for a building, cafeteria, parking, or stadium.",
+                )
+            )
             return
         self.select_landmark(match)
         self.map_search_input.setText(match)
@@ -542,8 +553,12 @@ class MapScreen(QWidget):
         self.map_canvas.select_landmark(landmark)
         category, description = LANDMARK_DETAILS.get(landmark, ("Campus Landmark", "Campus place on the walking map."))
         self.map_info_title.setText(landmark)
-        self.map_route_info_label.setText("Selected landmark")
-        self.map_selected_place_label.setText(f"Type/category: {category}\n{description}")
+        self.map_route_info_label.setText(
+            self._t("map_selected_landmark", "Selected landmark")
+        )
+        self.map_selected_place_label.setText(
+            f"{self._t('map_type_category', 'Type/category')}: {category}\n{description}"
+        )
         self.map_set_destination_button.setEnabled(True)
 
     def set_selected_as_destination(self) -> None:
@@ -578,10 +593,14 @@ class MapScreen(QWidget):
             self.current_route = []
             self._stop_walk()
             self.map_canvas.clear_route()
-            self.map_info_title.setText("Same location selected")
-            self.map_route_info_label.setText("Choose two different places to create a route.")
+            self.map_info_title.setText(
+                self._t("map_same_location_title", "Same location selected")
+            )
+            self.map_route_info_label.setText(
+                self._t("map_same_location_message", "Choose two different places to create a route.")
+            )
             self.map_route_steps_label.setText("")
-            self.map_walk_status_label.setText("Choose a route first.")
+            self.map_walk_status_label.setText(self._t("map_choose_route_first", "Choose a route first."))
             return
 
         route = self.shortest_path(start, destination)
@@ -589,10 +608,10 @@ class MapScreen(QWidget):
             self.current_route = []
             self._stop_walk()
             self.map_canvas.clear_route()
-            self.map_info_title.setText("No route found")
-            self.map_route_info_label.setText("Try another start or destination.")
+            self.map_info_title.setText(self._t("map_no_route_title", "No route found"))
+            self.map_route_info_label.setText(self._t("map_no_route_message", "Try another start or destination."))
             self.map_route_steps_label.setText("")
-            self.map_walk_status_label.setText("Choose a route first.")
+            self.map_walk_status_label.setText(self._t("map_choose_route_first", "Choose a route first."))
             return
 
         self.current_route = route
@@ -601,13 +620,15 @@ class MapScreen(QWidget):
         self.map_canvas.set_route(route, start, destination)
         self.map_canvas.set_walking_progress(0.0)
         minutes = max(1, round(self._route_distance(route) / 95))
-        self.map_info_title.setText("Route ready")
+        self.map_info_title.setText(self._t("map_route_ready", "Route ready"))
         self.map_route_info_label.setText(
-            f"Route: {start} \u2192 {destination}\n"
-            f"Estimated walking time: {minutes} min"
+            f"{self._t('map_route_label', 'Route')}: {start} \u2192 {destination}\n"
+            f"{self._t('map_estimated_time', 'Estimated walking time')}: {minutes} min"
         )
         self.map_route_steps_label.setText("\n".join(self._route_steps(route)))
-        self.map_walk_status_label.setText(f"Ready to walk to {destination}.")
+        self.map_walk_status_label.setText(
+            self._t("map_ready_to_walk", "Ready to walk to {destination}.").format(destination=destination)
+        )
 
     def reset_route(self) -> None:
         """Clear the active walking route."""
@@ -615,30 +636,36 @@ class MapScreen(QWidget):
         self._stop_walk()
         self.walking_progress = 0.0
         self.map_canvas.clear_route()
-        self.map_info_title.setText("Select a route")
-        self.map_route_info_label.setText("Choose a start and destination, then tap Find Route.")
+        self.map_info_title.setText(self._t("map_info_title_default", "Select a route"))
+        self.map_route_info_label.setText(
+            self._t("map_route_info_default", "Choose a start and destination, then tap Find Route.")
+        )
         self.map_route_steps_label.setText("")
-        self.map_walk_status_label.setText("Choose a route to start walking.")
+        self.map_walk_status_label.setText(
+            self._t("map_walk_status_default", "Choose a route to start walking.")
+        )
 
     def start_walk(self) -> None:
         """Start or resume walking along the selected route."""
         if len(self.current_route) < 2:
             self._stop_walk()
             self.map_canvas.set_walking_progress(None)
-            self.map_walk_status_label.setText("Choose a route first.")
+            self.map_walk_status_label.setText(self._t("map_choose_route_first", "Choose a route first."))
             return
         if self.walking_progress >= 1.0:
             self.walking_progress = 0.0
             self.map_canvas.set_walking_progress(0.0)
         self.is_walking = True
         self.walk_timer.start()
-        self.map_walk_status_label.setText(f"Walking to {self.current_route[-1]}...")
+        self.map_walk_status_label.setText(
+            self._t("map_walking_to", "Walking to {destination}...").format(destination=self.current_route[-1])
+        )
 
     def pause_walk(self) -> None:
         """Pause the walking animation."""
         self._stop_walk()
         if self.current_route:
-            self.map_walk_status_label.setText("Walk paused.")
+            self.map_walk_status_label.setText(self._t("map_walk_paused", "Walk paused."))
 
     def reset_walk(self) -> None:
         """Return the walking dot to the route start."""
@@ -646,10 +673,12 @@ class MapScreen(QWidget):
         self.walking_progress = 0.0
         if len(self.current_route) < 2:
             self.map_canvas.set_walking_progress(None)
-            self.map_walk_status_label.setText("Choose a route first.")
+            self.map_walk_status_label.setText(self._t("map_choose_route_first", "Choose a route first."))
             return
         self.map_canvas.set_walking_progress(0.0)
-        self.map_walk_status_label.setText(f"Ready at {self.current_route[0]}.")
+        self.map_walk_status_label.setText(
+            self._t("map_ready_at", "Ready at {start}.").format(start=self.current_route[0])
+        )
 
     def _stop_walk(self) -> None:
         """Stop the walk timer and clear active walking state."""
@@ -666,9 +695,13 @@ class MapScreen(QWidget):
         destination = self.current_route[-1]
         if self.walking_progress >= 1.0:
             self._stop_walk()
-            self.map_walk_status_label.setText(f"Arrived at {destination}")
+            self.map_walk_status_label.setText(
+                self._t("map_arrived_at", "Arrived at {destination}").format(destination=destination)
+            )
         else:
-            self.map_walk_status_label.setText(f"Walking to {destination}...")
+            self.map_walk_status_label.setText(
+                self._t("map_walking_to", "Walking to {destination}...").format(destination=destination)
+            )
 
     def _handle_landmark_click(self, landmark: str) -> None:
         """Show clicked landmark context in the route info panel."""
@@ -689,20 +722,20 @@ class MapScreen(QWidget):
         if not route:
             return []
         destination = route[-1]
-        steps = [f"1. Start at {route[0]}."]
+        steps = [self._t("map_step_start", "1. Start at {start}.").format(start=route[0])]
         if "@central_path" in route or "@cafeteria_path" in route:
-            steps.append("2. Walk toward the central path.")
+            steps.append(self._t("map_step_central", "2. Walk toward the central path."))
         elif "@east_path" in route:
-            steps.append("2. Follow the east campus walkway.")
+            steps.append(self._t("map_step_east", "2. Follow the east campus walkway."))
         else:
-            steps.append("2. Follow the nearest campus walkway.")
+            steps.append(self._t("map_step_nearest", "2. Follow the nearest campus walkway."))
         if destination == "Cafeteria":
-            steps.append("3. Continue left toward the Cafeteria.")
+            steps.append(self._t("map_step_cafeteria", "3. Continue left toward the Cafeteria."))
         elif destination == "Stadium":
-            steps.append("3. Continue toward the stadium path.")
+            steps.append(self._t("map_step_stadium", "3. Continue toward the stadium path."))
         else:
-            steps.append(f"3. Continue toward {destination}.")
-        steps.append(f"4. Arrive at {destination}.")
+            steps.append(self._t("map_step_continue", "3. Continue toward {destination}.").format(destination=destination))
+        steps.append(self._t("map_step_arrive", "4. Arrive at {destination}.").format(destination=destination))
         return steps
 
     def _apply_styles(self) -> None:
@@ -827,4 +860,31 @@ class MapScreen(QWidget):
 
     def update_language(self, translations: dict[str, str]) -> None:
         """Keep compatibility labels synchronized with language switching."""
+        self._translations = translations
+        self.map_title.setText(translations["map_title"])
+        self.map_subtitle.setText(translations["map_subtitle"])
         self.placeholder_title_label.setText(translations["placeholder_map_title"])
+        self.map_search_input.setPlaceholderText(translations["map_search_placeholder"])
+        self.map_search_button.setText(translations["map_search_button"])
+        self.map_from_label.setText(translations["map_from"])
+        self.map_to_label.setText(translations["map_to"])
+        self.map_find_route_button.setText(translations["map_find_route"])
+        self.map_reset_route_button.setText(translations["map_reset_route"])
+        self.map_info_eyebrow.setText(translations["map_info_eyebrow"])
+        self.map_set_destination_button.setText(translations["map_set_destination"])
+        self.map_start_walk_button.setText(translations["map_start_walk"])
+        self.map_pause_walk_button.setText(translations["map_pause_walk"])
+        self.map_reset_walk_button.setText(translations["map_reset_walk"])
+        if not self.current_route and self.selected_landmark is None:
+            self.map_info_title.setText(translations["map_info_title_default"])
+            self.map_route_info_label.setText(translations["map_route_info_default"])
+            self.map_selected_place_label.setText(translations["map_selected_place_default"])
+            self.map_walk_status_label.setText(translations["map_walk_status_default"])
+        elif self.selected_landmark is not None and not self.current_route:
+            self.select_landmark(self.selected_landmark)
+        elif self.current_route:
+            self.find_route()
+
+    def _t(self, key: str, fallback: str) -> str:
+        """Return translated map copy with a safe fallback."""
+        return self._translations.get(key, fallback)

@@ -63,13 +63,13 @@ class AdminGateScreen(QWidget):
         card_layout.setContentsMargins(36, 34, 36, 34)
         card_layout.setSpacing(18)
 
-        eyebrow = QLabel("Protected Area")
-        eyebrow.setObjectName("admin_gate_eyebrow")
-        title = QLabel("Admin Data Access")
-        title.setObjectName("admin_gate_title")
-        subtitle = QLabel("Enter admin password to manage university data.")
-        subtitle.setObjectName("admin_gate_subtitle")
-        subtitle.setWordWrap(True)
+        self.admin_gate_eyebrow = QLabel("Protected Area")
+        self.admin_gate_eyebrow.setObjectName("admin_gate_eyebrow")
+        self.admin_gate_title = QLabel("Admin Data Access")
+        self.admin_gate_title.setObjectName("admin_gate_title")
+        self.admin_gate_subtitle = QLabel("Enter admin password to manage university data.")
+        self.admin_gate_subtitle.setObjectName("admin_gate_subtitle")
+        self.admin_gate_subtitle.setWordWrap(True)
 
         self.admin_password_input = QLineEdit()
         self.admin_password_input.setObjectName("admin_password_input")
@@ -87,9 +87,9 @@ class AdminGateScreen(QWidget):
         self.admin_gate_status_label.setObjectName("admin_gate_status_label")
         self.admin_gate_status_label.setWordWrap(True)
 
-        card_layout.addWidget(eyebrow)
-        card_layout.addWidget(title)
-        card_layout.addWidget(subtitle)
+        card_layout.addWidget(self.admin_gate_eyebrow)
+        card_layout.addWidget(self.admin_gate_title)
+        card_layout.addWidget(self.admin_gate_subtitle)
         card_layout.addSpacing(10)
         card_layout.addWidget(self.admin_password_input)
         card_layout.addWidget(self.admin_unlock_button)
@@ -102,12 +102,20 @@ class AdminGateScreen(QWidget):
         """Check the temporary gate password and update status text."""
         if self.admin_password_input.text() == self.ADMIN_PASSWORD:
             self.admin_gate_status_label.setText(
-                "Access granted. Opening data dashboard."
+                getattr(self, "_translations", {}).get(
+                    "admin_access_granted",
+                    "Access granted. Opening data dashboard.",
+                )
             )
             if self.parent_window is not None:
                 self.parent_window.show_data_dashboard()
             return
-        self.admin_gate_status_label.setText("Incorrect password. Please try again.")
+        self.admin_gate_status_label.setText(
+            getattr(self, "_translations", {}).get(
+                "admin_wrong_password",
+                "Incorrect password. Please try again.",
+            )
+        )
 
     def _apply_styles(self) -> None:
         """Apply the ECU public dashboard visual language."""
@@ -180,3 +188,14 @@ class AdminGateScreen(QWidget):
             }}
             """
         )
+
+    def update_language(self, translations: dict[str, str]) -> None:
+        """Refresh visible admin gate copy."""
+        self._translations = translations
+        self.admin_gate_eyebrow.setText(translations["admin_gate_eyebrow"])
+        self.admin_gate_title.setText(translations["admin_gate_title"])
+        self.admin_gate_subtitle.setText(translations["admin_gate_subtitle"])
+        self.admin_password_input.setPlaceholderText(
+            translations["admin_password_placeholder"]
+        )
+        self.admin_unlock_button.setText(translations["admin_unlock"])

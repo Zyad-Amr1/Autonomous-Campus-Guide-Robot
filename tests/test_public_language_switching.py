@@ -51,7 +51,7 @@ def test_public_main_window_starts_in_english() -> None:
         assert window.current_language == "en"
         assert window.layoutDirection() == Qt.LayoutDirection.LeftToRight
         assert window.sidebar_home_button.text() == TRANSLATIONS["en"]["home"]
-        assert window.language_toggle_button.text() == "عربي"
+        assert window.language_toggle_button.text() == "العربية"
     finally:
         window.close()
 
@@ -74,7 +74,7 @@ def test_language_toggle_switches_between_arabic_and_english() -> None:
         assert window.layoutDirection() == Qt.LayoutDirection.LeftToRight
         assert window.sidebar_home_button.text() == TRANSLATIONS["en"]["home"]
         assert window.sidebar_map_button.text() == TRANSLATIONS["en"]["map"]
-        assert window.language_toggle_button.text() == "عربي"
+        assert window.language_toggle_button.text() == "العربية"
     finally:
         window.close()
 
@@ -97,6 +97,11 @@ def test_page_labels_and_navigation_survive_language_toggle() -> None:
         )
         assert title_label is not None
         assert title_label.text() == TRANSLATIONS["ar"]["placeholder_map_title"]
+        assert window.map_screen.map_title.text() == TRANSLATIONS["ar"]["map_title"]
+        assert (
+            window.home_screen.home_welcome_title.text()
+            == TRANSLATIONS["ar"]["home_hero_title"]
+        )
 
         window.sidebar_chat_button.click()
         assert window.public_page_stack.currentIndex() == 6

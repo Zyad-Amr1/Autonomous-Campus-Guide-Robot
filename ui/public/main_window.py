@@ -291,6 +291,10 @@ class PublicMainWindow(QMainWindow):
         self.current_language = "ar" if self.current_language == "en" else "en"
         self.apply_language()
 
+    def tr(self, key: str) -> str:
+        """Return translated public dashboard copy for the active language."""
+        return TRANSLATIONS[self.current_language][key]
+
     def apply_language(self) -> None:
         """Apply the current language to visible text and layout direction."""
         translations = TRANSLATIONS[self.current_language]
@@ -305,6 +309,9 @@ class PublicMainWindow(QMainWindow):
         self.setLayoutDirection(direction)
         self.centralWidget().setLayoutDirection(direction)
         self.public_page_stack.setLayoutDirection(direction)
+        self.header_title_label.setLayoutDirection(direction)
+        self.header_subtitle_label.setLayoutDirection(direction)
+        self.header_home_button.setLayoutDirection(direction)
         self.home_screen.setLayoutDirection(direction)
         self.map_screen.setLayoutDirection(direction)
         self.admin_gate_screen.setLayoutDirection(direction)
@@ -312,8 +319,12 @@ class PublicMainWindow(QMainWindow):
         self.setWindowTitle(translations["app_title"].replace("\n", " "))
         self.app_title_label.setText(translations["app_title"])
         self.app_subtitle_label.setText(translations["app_subtitle"])
+        self.header_title_label.setText(translations["header_title"])
+        self.header_subtitle_label.setText(translations["header_subtitle"])
+        self.header_home_button.setText(translations["header_home"])
         self.language_toggle_button.setText(translations["language_toggle"])
         self.floating_ask_button.setText(translations["ask_me"])
+        self.emergency_help_button.setText(translations["help"])
         self.floating_ask_button.setLayoutDirection(direction)
         self.emergency_help_button.setLayoutDirection(direction)
 
@@ -337,7 +348,10 @@ class PublicMainWindow(QMainWindow):
                 translations[f"placeholder_{key}_subtitle"],
                 translations["placeholder_message"],
             )
+        self.home_screen.update_language(translations)
         self.map_screen.update_language(translations)
+        self.admin_gate_screen.update_language(translations)
+        self.data_dashboard_screen.update_language(translations)
 
     def show_emergency_help(self) -> None:
         """Show hardcoded emergency contact information for public users."""

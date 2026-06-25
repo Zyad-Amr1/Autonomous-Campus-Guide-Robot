@@ -1,11 +1,11 @@
-"""Headless tests for the public campus map screen."""
+"""Headless tests for the public campus map route screen."""
 
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QWidget
 
 from ui.public.main_window import PublicMainWindow
 from ui.public.screens.map_screen import MapCanvas, MapScreen
@@ -48,11 +48,13 @@ def test_map_screen_required_widgets_exist() -> None:
         for object_name, widget_type in (
             ("map_title", QLabel),
             ("map_subtitle", QLabel),
-            ("map_search_input", QLineEdit),
             ("map_canvas", MapCanvas),
+            ("map_from_combo", QComboBox),
+            ("map_to_combo", QComboBox),
+            ("map_find_route_button", QPushButton),
+            ("map_reset_route_button", QPushButton),
+            ("map_route_info_label", QLabel),
             ("map_info_panel", QWidget),
-            ("map_info_title", QLabel),
-            ("map_info_details", QLabel),
         ):
             assert screen.findChild(widget_type, object_name) is not None
     finally:
@@ -68,37 +70,6 @@ def test_map_canvas_exists() -> None:
         assert canvas is not None
         assert canvas.minimumWidth() >= 600
         assert canvas.minimumHeight() >= 400
-    finally:
-        screen.close()
-
-
-def test_filter_buttons_exist() -> None:
-    application = _get_application()
-    screen = MapScreen()
-    try:
-        assert application is not None
-        for object_name in (
-            "filter_all_button",
-            "filter_labs_button",
-            "filter_offices_button",
-            "filter_clinics_button",
-            "filter_library_button",
-            "filter_cafeteria_button",
-            "filter_other_button",
-        ):
-            assert screen.findChild(QPushButton, object_name) is not None
-    finally:
-        screen.close()
-
-
-def test_search_input_exists_with_placeholder() -> None:
-    application = _get_application()
-    screen = MapScreen()
-    try:
-        assert application is not None
-        search_input = screen.findChild(QLineEdit, "map_search_input")
-        assert search_input is not None
-        assert search_input.placeholderText() == "Search for a room, lab, office..."
     finally:
         screen.close()
 

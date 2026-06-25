@@ -1,15 +1,15 @@
-"""Public campus map screen with a professional placeholder canvas."""
+"""Public campus map route simulation screen."""
 
+from heapq import heappop, heappush
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -21,7 +21,6 @@ from ui.public.theme import (
     CARD_RADIUS,
     GOLD,
     GOLD_LIGHT,
-    LIGHT_GRAY,
     NAVY,
     NAVY_DARK,
     NAVY_LIGHT,
@@ -34,47 +33,86 @@ from ui.public.theme import (
     font,
     px,
 )
-from database.connection import DB_NAME
-from database.repositories.room_repository import get_all_rooms
 
 
-CATEGORY_COLORS = {
-    "labs": "#2F80ED",
-    "laboratory": "#2F80ED",
-    "laboratories": "#2F80ED",
-    "offices": "#8E5CF7",
-    "office": "#8E5CF7",
-    "clinics": "#D94D45",
-    "clinic": "#D94D45",
-    "medical": "#D94D45",
-    "library": "#3BAA6B",
-    "cafeteria": "#E67E22",
-    "other": GOLD,
+LANDMARKS = {
+    "Building A": (555, 515),
+    "Building B": (455, 765),
+    "Building C": (280, 705),
+    "Building D": (305, 555),
+    "Building E": (480, 205),
+    "Cafeteria": (310, 395),
+    "Parking": (505, 60),
+    "Stadium": (840, 230),
+    "Workshop 1": (95, 675),
+    "Workshop 2": (285, 280),
+    "Boys' Musallah": (760, 585),
+    "Girls' Musallah": (790, 420),
+    "Sports Activity": (775, 510),
+}
+
+WALKING_GRAPH = {
+    "Parking": ("Building E", "Stadium"),
+    "Building E": ("Parking", "Workshop 2", "Building A"),
+    "Workshop 2": ("Building E", "Cafeteria", "Building D"),
+    "Cafeteria": ("Workshop 2", "Building D", "Building A"),
+    "Building D": ("Workshop 2", "Cafeteria", "Building C", "Building A"),
+    "Building C": ("Workshop 1", "Building D", "Building B"),
+    "Workshop 1": ("Building C",),
+    "Building B": ("Building C", "Building A"),
+    "Building A": (
+        "Building E",
+        "Cafeteria",
+        "Building D",
+        "Building B",
+        "Girls' Musallah",
+        "Sports Activity",
+    ),
+    "Girls' Musallah": ("Building A", "Stadium", "Sports Activity"),
+    "Sports Activity": ("Building A", "Girls' Musallah", "Boys' Musallah"),
+    "Boys' Musallah": ("Sports Activity", "Stadium"),
+    "Stadium": ("Parking", "Girls' Musallah", "Boys' Musallah"),
 }
 
 
 class MapCanvas(QWidget):
-    """Draw a static, polished 2D placeholder campus map."""
+    """Display the ECU campus map image plus simulated route overlays."""
 
-    def __init__(self) -> None:
-        """Create the custom map canvas."""
+    IMPORTANT_LABELS = {
+        "Building A",
+        "Building B",
+        "Building C",
+        "Building D",
+        "Building E",
+        "Cafeteria",
+        "Stadium",
+    }
+
+    def __init__(self, background_image_path: str | None = None) -> None:
+        """Create an image-ready map canvas."""
         super().__init__()
         self.setObjectName("map_canvas")
         self.setMinimumSize(620, 440)
         self.background_image_path: str | None = None
         self._background_pixmap = QPixmap()
-        self.markers: list[dict] = []
-        self.selected_marker: dict | None = None
-        self.marker_clicked = None
-        self._marker_hit_radius = 16
+        self.landmarks = LANDMARKS.copy()
+        self.current_route: list[str] = []
+        self.route_start: str | None = None
+        self.route_destination: str | None = None
+        self.selected_landmark: str | None = None
+        self.landmark_clicked = None
+        self._image_target_rect = QRectF()
+        self._marker_hit_radius = 18
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        if background_image_path is not None:
+            self.set_background_image(background_image_path)
 
     def set_background_image(self, path: str) -> None:
-        """Set a future real campus image path and repaint the canvas."""
+        """Set a campus map image path and repaint the canvas."""
         self.background_image_path = path
         image_path = Path(path)
         self._background_pixmap = (
@@ -82,301 +120,182 @@ class MapCanvas(QWidget):
         )
         self.update()
 
-    def set_markers(self, rooms: list[dict]) -> None:
-        """Replace visible room markers with mappable room dictionaries."""
-        self.markers = [room for room in rooms if self._has_valid_coordinates(room)]
-        self.selected_marker = None
+    def set_route(self, route: list[str], start: str, destination: str) -> None:
+        """Store and draw a selected walking route."""
+        self.current_route = route
+        self.route_start = start
+        self.route_destination = destination
         self.update()
 
-    def marker_color(self, category: str | None) -> str:
-        """Return the display color for one marker category."""
-        normalized = (category or "other").strip().lower()
-        return CATEGORY_COLORS.get(normalized, CATEGORY_COLORS["other"])
+    def clear_route(self) -> None:
+        """Clear route overlays and selected endpoints."""
+        self.current_route = []
+        self.route_start = None
+        self.route_destination = None
+        self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        """Paint an illustrative campus map without loading real markers."""
+        """Paint the map image, route, and hardcoded landmarks."""
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        rect = self.rect().adjusted(16, 16, -16, -16)
+        canvas_rect = QRectF(self.rect().adjusted(16, 16, -16, -16))
         painter.setPen(QPen(QColor("#D8D2C5"), 1))
         painter.setBrush(QColor("#ECE8DC"))
-        painter.drawRoundedRect(rect, 24, 24)
-        if not self._background_pixmap.isNull():
-            self._draw_background_image(painter, rect)
-            self._draw_room_markers(painter, QRectF(rect))
-            return
+        painter.drawRoundedRect(canvas_rect, 24, 24)
 
-        self._draw_landscape(painter, QRectF(rect))
-        self._draw_roads(painter, QRectF(rect))
-        self._draw_walkways(painter, QRectF(rect))
-        self._draw_buildings(painter, QRectF(rect))
-        if self.markers:
-            self._draw_room_markers(painter, QRectF(rect))
+        if self._background_pixmap.isNull():
+            self._image_target_rect = canvas_rect
+            self._draw_missing_image_message(painter, canvas_rect)
         else:
-            self._draw_placeholder_markers(painter, QRectF(rect))
+            self._draw_background_image(painter, canvas_rect)
 
-    def _draw_background_image(self, painter: QPainter, rect) -> None:
-        """Draw a real campus image scaled neatly inside the canvas."""
-        scaled = self._background_pixmap.scaled(
-            rect.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        target_x = rect.x() + (rect.width() - scaled.width()) // 2
-        target_y = rect.y() + (rect.height() - scaled.height()) // 2
-        clip_path = QPainterPath()
-        clip_path.addRoundedRect(QRectF(rect), 24, 24)
-        painter.save()
-        painter.setClipPath(clip_path)
-        painter.drawPixmap(target_x, target_y, scaled)
-        painter.restore()
-
-    def _draw_landscape(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw soft green zones and a central plaza."""
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#DCE7D6"))
-        painter.drawEllipse(QRectF(rect.left() + 26, rect.top() + 34, 210, 135))
-        painter.drawEllipse(QRectF(rect.right() - 236, rect.bottom() - 164, 210, 126))
-        painter.setBrush(QColor("#C8DDC2"))
-        for x, y in (
-            (0.18, 0.16),
-            (0.28, 0.78),
-            (0.64, 0.18),
-            (0.76, 0.55),
-            (0.88, 0.82),
-        ):
-            center = QPointF(
-                rect.left() + rect.width() * x,
-                rect.top() + rect.height() * y,
-            )
-            painter.drawEllipse(center, 14, 14)
-
-        plaza = QRectF(
-            rect.center().x() - 86,
-            rect.center().y() - 58,
-            172,
-            116,
-        )
-        painter.setBrush(QColor("#E8D9B8"))
-        painter.drawRoundedRect(plaza, 28, 28)
-        painter.setPen(QPen(QColor(GOLD), 2))
-        painter.drawEllipse(plaza.adjusted(38, 18, -38, -18))
-
-    def _draw_roads(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw soft road bands around the simulated campus blocks."""
-        painter.setPen(
-            QPen(
-                QColor("#C8C1B2"),
-                22,
-                Qt.PenStyle.SolidLine,
-                Qt.PenCapStyle.RoundCap,
-            )
-        )
-        painter.drawLine(
-            QPointF(rect.left() + 34, rect.top() + 58),
-            QPointF(rect.right() - 34, rect.top() + 58),
-        )
-        painter.drawLine(
-            QPointF(rect.left() + 42, rect.bottom() - 58),
-            QPointF(rect.right() - 42, rect.bottom() - 58),
-        )
-        painter.setPen(
-            QPen(
-                QColor("#F6F2E8"),
-                4,
-                Qt.PenStyle.DashLine,
-                Qt.PenCapStyle.RoundCap,
-            )
-        )
-        painter.drawLine(
-            QPointF(rect.left() + 42, rect.top() + 58),
-            QPointF(rect.right() - 42, rect.top() + 58),
-        )
-        painter.drawLine(
-            QPointF(rect.left() + 50, rect.bottom() - 58),
-            QPointF(rect.right() - 50, rect.bottom() - 58),
-        )
-
-    def _draw_walkways(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw light curved pedestrian paths through the campus."""
-        painter.setPen(QPen(QColor("#F9F7F0"), 14, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        path = QPainterPath(QPointF(rect.left() + 48, rect.center().y()))
-        path.cubicTo(
-            QPointF(rect.left() + 220, rect.top() + 120),
-            QPointF(rect.right() - 220, rect.bottom() - 120),
-            QPointF(rect.right() - 48, rect.center().y()),
-        )
-        painter.drawPath(path)
-
-        painter.setPen(QPen(QColor("#CDBE95"), 2, Qt.PenStyle.DashLine))
-        painter.drawPath(path)
-
-        painter.setPen(QPen(QColor("#F9F7F0"), 10, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        vertical_path = QPainterPath(QPointF(rect.center().x(), rect.top() + 42))
-        vertical_path.cubicTo(
-            QPointF(rect.center().x() - 82, rect.top() + 150),
-            QPointF(rect.center().x() + 82, rect.bottom() - 150),
-            QPointF(rect.center().x(), rect.bottom() - 42),
-        )
-        painter.drawPath(vertical_path)
-
-    def _draw_buildings(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw navy campus building blocks and labels."""
-        buildings = (
-            ("Engineering\nBuilding", 0.08, 0.20, 0.24, 0.18),
-            ("Science\nComplex", 0.38, 0.12, 0.24, 0.17),
-            ("Library", 0.68, 0.20, 0.21, 0.18),
-            ("Administration", 0.10, 0.62, 0.24, 0.17),
-            ("Health\nCenter", 0.42, 0.66, 0.20, 0.16),
-            ("Student\nCenter", 0.69, 0.60, 0.22, 0.19),
-        )
-        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        for label, x, y, width, height in buildings:
-            building_rect = QRectF(
-                rect.left() + rect.width() * x,
-                rect.top() + rect.height() * y,
-                rect.width() * width,
-                rect.height() * height,
-            )
-            painter.setPen(QPen(QColor("#071B35"), 1))
-            painter.setBrush(QColor(NAVY))
-            painter.drawRoundedRect(building_rect, 14, 14)
-            painter.setPen(QColor(WHITE))
-            painter.drawText(
-                building_rect.adjusted(10, 8, -10, -8),
-                Qt.AlignmentFlag.AlignCenter,
-                label,
-            )
-
-    def _draw_placeholder_markers(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw simple placeholder colored markers."""
-        markers = (
-            ("i", 0.20, 0.43, GOLD),
-            ("L", 0.78, 0.42, "#3BAA6B"),
-            ("+", 0.53, 0.58, "#D94D45"),
-            ("C", 0.82, 0.74, "#2F80ED"),
-        )
-        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        for label, x, y, color in markers:
-            center = QPointF(
-                rect.left() + rect.width() * x,
-                rect.top() + rect.height() * y,
-            )
-            painter.setPen(QPen(QColor(WHITE), 3))
-            painter.setBrush(QColor(color))
-            painter.drawEllipse(center, 13, 13)
-            painter.setPen(QColor(WHITE))
-            painter.drawText(
-                QRectF(center.x() - 12, center.y() - 12, 24, 24),
-                Qt.AlignmentFlag.AlignCenter,
-                label,
-            )
-
-    def _draw_room_markers(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw database-backed room markers on the active map surface."""
-        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        for marker in self.markers:
-            center = self._marker_center(marker, rect)
-            is_selected = marker is self.selected_marker
-            radius = 18 if is_selected else 14
-            painter.setPen(QPen(QColor(WHITE), 4 if is_selected else 3))
-            painter.setBrush(QColor(self.marker_color(marker.get("category"))))
-            painter.drawEllipse(center, radius, radius)
-            painter.setPen(QColor(WHITE))
-            painter.drawText(
-                QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2),
-                Qt.AlignmentFlag.AlignCenter,
-                self._marker_initial(marker),
-            )
+        self._draw_route(painter)
+        self._draw_landmarks(painter)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        """Select a room marker when a user taps near it."""
-        canvas_rect = QRectF(self.rect().adjusted(16, 16, -16, -16))
-        for marker in reversed(self.markers):
-            center = self._marker_center(marker, canvas_rect)
+        """Select a landmark when a user taps near its marker."""
+        for name in reversed(list(self.landmarks)):
+            center = self._point_for_landmark(name)
             delta = center - event.position()
             if (
                 delta.x() * delta.x() + delta.y() * delta.y()
                 <= self._marker_hit_radius * self._marker_hit_radius
             ):
-                self.select_marker(marker)
+                self.selected_landmark = name
+                if self.landmark_clicked is not None:
+                    self.landmark_clicked(name)
+                self.update()
                 return
         super().mousePressEvent(event)
 
-    def select_marker(self, marker: dict) -> None:
-        """Set the active marker and notify the optional owner callback."""
-        self.selected_marker = marker
-        self.update()
-        if self.marker_clicked is not None:
-            self.marker_clicked(marker)
+    def _draw_background_image(self, painter: QPainter, rect: QRectF) -> None:
+        """Draw the real campus map image scaled with aspect ratio preserved."""
+        scaled = self._background_pixmap.scaled(
+            rect.size().toSize(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        target_x = rect.x() + (rect.width() - scaled.width()) / 2
+        target_y = rect.y() + (rect.height() - scaled.height()) / 2
+        self._image_target_rect = QRectF(target_x, target_y, scaled.width(), scaled.height())
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(rect, 24, 24)
+        painter.save()
+        painter.setClipPath(clip_path)
+        painter.drawPixmap(int(target_x), int(target_y), scaled)
+        painter.restore()
 
-    def _marker_center(self, marker: dict, rect: QRectF) -> QPointF:
-        """Translate normalized room coordinates into canvas coordinates."""
-        x_value = float(marker["x_coord"])
-        y_value = float(marker["y_coord"])
-        if x_value > 1 or y_value > 1:
-            x_value /= 100.0
-            y_value /= 100.0
-        x_value = min(max(x_value, 0.0), 1.0)
-        y_value = min(max(y_value, 0.0), 1.0)
-        return QPointF(
-            rect.left() + rect.width() * x_value,
-            rect.top() + rect.height() * y_value,
+    def _draw_missing_image_message(self, painter: QPainter, rect: QRectF) -> None:
+        """Draw a friendly placeholder when the map image is unavailable."""
+        painter.setPen(QPen(QColor("#D8D2C5"), 2, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor("#F1EEE7"))
+        painter.drawRoundedRect(rect.adjusted(18, 18, -18, -18), 22, 22)
+        painter.setPen(QColor(TEXT_MUTED))
+        painter.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        painter.drawText(
+            rect,
+            Qt.AlignmentFlag.AlignCenter,
+            "Campus map image not found.",
         )
 
-    def _marker_initial(self, marker: dict) -> str:
-        """Return a compact marker label."""
-        room_name = str(marker.get("room_name") or marker.get("room_number") or "?")
-        return room_name[:1].upper()
+    def _draw_route(self, painter: QPainter) -> None:
+        """Draw the current route as a gold walking polyline."""
+        if len(self.current_route) < 2:
+            return
+        path = QPainterPath(self._point_for_landmark(self.current_route[0]))
+        for landmark in self.current_route[1:]:
+            path.lineTo(self._point_for_landmark(landmark))
+        painter.setPen(
+            QPen(
+                QColor(GOLD),
+                7,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.drawPath(path)
+        painter.setPen(
+            QPen(
+                QColor(WHITE),
+                2,
+                Qt.PenStyle.DashLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        painter.drawPath(path)
 
-    def _has_valid_coordinates(self, room: dict) -> bool:
-        """Return whether a room has usable x/y marker coordinates."""
-        try:
-            if room.get("x_coord") is None or room.get("y_coord") is None:
-                return False
-            float(room["x_coord"])
-            float(room["y_coord"])
-            return True
-        except AttributeError:
-            return False
-        except (TypeError, ValueError):
-            return False
+    def _draw_landmarks(self, painter: QPainter) -> None:
+        """Draw all campus landmark markers and key labels."""
+        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        for name in self.landmarks:
+            center = self._point_for_landmark(name)
+            color = QColor(NAVY_LIGHT)
+            radius = 10
+            if name == self.route_start:
+                color = QColor("#22A06B")
+                radius = 15
+            elif name == self.route_destination:
+                color = QColor("#D94D45")
+                radius = 15
+            elif name == self.selected_landmark:
+                color = QColor(GOLD)
+                radius = 13
+
+            painter.setPen(QPen(QColor(WHITE), 3))
+            painter.setBrush(color)
+            painter.drawEllipse(center, radius, radius)
+
+            if name in self.IMPORTANT_LABELS or name in (self.route_start, self.route_destination):
+                label_rect = QRectF(center.x() + 12, center.y() - 13, 122, 26)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(255, 255, 255, 218))
+                painter.drawRoundedRect(label_rect, 8, 8)
+                painter.setPen(QColor(TEXT_DARK))
+                painter.drawText(
+                    label_rect.adjusted(7, 0, -7, 0),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    name,
+                )
+
+    def _point_for_landmark(self, name: str) -> QPointF:
+        """Convert 0-1000 normalized coordinates into canvas points."""
+        x_value, y_value = self.landmarks[name]
+        rect = self._image_target_rect if self._image_target_rect.isValid() else QRectF(self.rect().adjusted(16, 16, -16, -16))
+        return QPointF(
+            rect.left() + rect.width() * (x_value / 1000),
+            rect.top() + rect.height() * (y_value / 1000),
+        )
 
 
 class MapScreen(QWidget):
-    """Display the public campus map search, filters, canvas, and info panel."""
+    """Display hardcoded campus walking navigation over the ECU map."""
 
-    FILTERS = (
-        ("All", "filter_all_button"),
-        ("Labs", "filter_labs_button"),
-        ("Offices", "filter_offices_button"),
-        ("Clinics", "filter_clinics_button"),
-        ("Library", "filter_library_button"),
-        ("Cafeteria", "filter_cafeteria_button"),
-        ("Other", "filter_other_button"),
-    )
+    MAP_IMAGE_PATH = "assets/maps/ecu_campus_map.png"
 
-    def __init__(self, db_path=DB_NAME) -> None:
-        """Create the map screen without touching real map data."""
+    def __init__(self, map_image_path: str | None = None) -> None:
+        """Create the route simulation map screen."""
         super().__init__()
-        self.db_path = db_path
+        self.map_image_path = map_image_path or self.MAP_IMAGE_PATH
+        self.landmarks = LANDMARKS.copy()
+        self.walking_graph = {key: tuple(value) for key, value in WALKING_GRAPH.items()}
+        self.current_route: list[str] = []
         self.setObjectName("map_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
         self._apply_styles()
-        self.load_room_markers()
 
     def _build_ui(self) -> None:
-        """Arrange the map header, controls, canvas, and info panel."""
+        """Arrange route controls, map canvas, and info panel."""
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(PAGE_PADDING + 8, PAGE_PADDING, PAGE_PADDING + 8, PAGE_PADDING)
         page_layout.setSpacing(16)
 
         self.map_title = QLabel("Campus Map")
         self.map_title.setObjectName("map_title")
-        self.map_subtitle = QLabel("Find rooms, buildings, offices, and important places.")
+        self.map_subtitle = QLabel("Choose where you are and where you want to go.")
         self.map_subtitle.setObjectName("map_subtitle")
         self.map_subtitle.setWordWrap(True)
         self.placeholder_title_label = QLabel("Campus Map", self)
@@ -385,100 +304,153 @@ class MapScreen(QWidget):
         page_layout.addWidget(self.map_title)
         page_layout.addWidget(self.map_subtitle)
 
-        controls_layout = QHBoxLayout()
+        controls = QFrame()
+        controls.setObjectName("map_controls_panel")
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(16, 14, 16, 14)
         controls_layout.setSpacing(12)
-        self.map_search_input = QLineEdit()
-        self.map_search_input.setObjectName("map_search_input")
-        self.map_search_input.setPlaceholderText("Search for a room, lab, office...")
-        self.map_search_input.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
-        controls_layout.addWidget(self.map_search_input, stretch=1)
 
-        filter_layout = QHBoxLayout()
-        filter_layout.setSpacing(8)
-        self.filter_buttons: dict[str, QPushButton] = {}
-        for label, object_name in self.FILTERS:
-            button = QPushButton(label)
-            button.setObjectName(object_name)
-            button.setCheckable(True)
-            button.setMinimumHeight(46)
+        self.map_from_combo = QComboBox()
+        self.map_from_combo.setObjectName("map_from_combo")
+        self.map_to_combo = QComboBox()
+        self.map_to_combo.setObjectName("map_to_combo")
+        for combo in (self.map_from_combo, self.map_to_combo):
+            combo.addItems(self.landmarks.keys())
+            combo.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        self.map_to_combo.setCurrentText("Cafeteria")
+
+        self.map_find_route_button = QPushButton("Find Route")
+        self.map_find_route_button.setObjectName("map_find_route_button")
+        self.map_reset_route_button = QPushButton("Reset Route")
+        self.map_reset_route_button.setObjectName("map_reset_route_button")
+        for button in (self.map_find_route_button, self.map_reset_route_button):
+            button.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            if label == "All":
-                button.setChecked(True)
-            self.filter_buttons[object_name] = button
-            setattr(self, object_name, button)
-            filter_layout.addWidget(button)
-        page_layout.addLayout(controls_layout)
-        page_layout.addLayout(filter_layout)
+
+        self.map_find_route_button.clicked.connect(self.find_route)
+        self.map_reset_route_button.clicked.connect(self.reset_route)
+
+        controls_layout.addWidget(QLabel("From"))
+        controls_layout.addWidget(self.map_from_combo, stretch=1)
+        controls_layout.addWidget(QLabel("To"))
+        controls_layout.addWidget(self.map_to_combo, stretch=1)
+        controls_layout.addWidget(self.map_find_route_button)
+        controls_layout.addWidget(self.map_reset_route_button)
+        page_layout.addWidget(controls)
 
         body_layout = QHBoxLayout()
         body_layout.setSpacing(18)
-        self.map_canvas = MapCanvas()
-        self.map_canvas.marker_clicked = self.update_selected_room
+        self.map_canvas = MapCanvas(self.map_image_path)
+        self.map_canvas.landmark_clicked = self._handle_landmark_click
         body_layout.addWidget(self.map_canvas, stretch=3)
         body_layout.addWidget(self._create_info_panel(), stretch=1)
         page_layout.addLayout(body_layout, stretch=1)
 
     def _create_info_panel(self) -> QFrame:
-        """Create the right-side selected-location placeholder panel."""
+        """Create the Google Maps-like route info panel."""
         self.map_info_panel = QFrame()
         self.map_info_panel.setObjectName("map_info_panel")
-        self.map_info_panel.setMinimumWidth(280)
+        self.map_info_panel.setMinimumWidth(300)
         panel_layout = QVBoxLayout(self.map_info_panel)
         panel_layout.setContentsMargins(24, 24, 24, 24)
         panel_layout.setSpacing(12)
 
-        eyebrow = QLabel("Selected Location")
+        eyebrow = QLabel("Walking Navigation")
         eyebrow.setObjectName("map_info_eyebrow")
-        self.map_info_title = QLabel("Select a place")
+        self.map_info_title = QLabel("Select a route")
         self.map_info_title.setObjectName("map_info_title")
-        self.map_info_details = QLabel("Tap a marker on the map to view details.")
-        self.map_info_details.setObjectName("map_info_details")
-        self.map_info_details.setWordWrap(True)
+        self.map_route_info_label = QLabel("Choose a start and destination, then tap Find Route.")
+        self.map_route_info_label.setObjectName("map_route_info_label")
+        self.map_route_info_label.setWordWrap(True)
+        self.map_info_details = self.map_route_info_label
 
         panel_layout.addWidget(eyebrow)
         panel_layout.addWidget(self.map_info_title)
-        panel_layout.addWidget(self.map_info_details)
+        panel_layout.addWidget(self.map_route_info_label)
         panel_layout.addStretch()
         return self.map_info_panel
 
-    def load_room_markers(self) -> None:
-        """Load mappable room records from the configured database."""
-        try:
-            rooms = get_all_rooms(self.db_path)
-        except Exception:
-            self.map_canvas.set_markers([])
+    def shortest_path(self, start: str, destination: str) -> list[str]:
+        """Return a Dijkstra shortest path between two landmarks."""
+        if start not in self.landmarks or destination not in self.landmarks:
+            return []
+        queue = [(0.0, start, [start])]
+        visited: set[str] = set()
+        while queue:
+            distance, node, path = heappop(queue)
+            if node == destination:
+                return path
+            if node in visited:
+                continue
+            visited.add(node)
+            for neighbor in self.walking_graph.get(node, ()):
+                if neighbor in visited:
+                    continue
+                heappush(
+                    queue,
+                    (
+                        distance + self._distance(node, neighbor),
+                        neighbor,
+                        path + [neighbor],
+                    ),
+                )
+        return []
+
+    def find_route(self) -> None:
+        """Find and draw a simulated walking route from the selected combos."""
+        start = self.map_from_combo.currentText()
+        destination = self.map_to_combo.currentText()
+        if start == destination:
+            self.current_route = []
+            self.map_canvas.clear_route()
+            self.map_info_title.setText("Same location selected")
+            self.map_route_info_label.setText("Choose two different places to create a route.")
             return
-        markers = [self._room_to_marker(room) for room in rooms]
-        self.map_canvas.set_markers(
-            [marker for marker in markers if marker is not None]
+
+        route = self.shortest_path(start, destination)
+        if not route:
+            self.current_route = []
+            self.map_canvas.clear_route()
+            self.map_info_title.setText("No route found")
+            self.map_route_info_label.setText("Try another start or destination.")
+            return
+
+        self.current_route = route
+        self.map_canvas.set_route(route, start, destination)
+        minutes = max(1, round(self._route_distance(route) / 75))
+        self.map_info_title.setText("Route ready")
+        self.map_route_info_label.setText(
+            f"Route: {start} → {destination}\n"
+            f"Estimated walking time: {minutes} min"
         )
 
-    def update_selected_room(self, marker: dict) -> None:
-        """Update the right info panel with the selected room details."""
-        self.map_info_title.setText(str(marker.get("room_name") or "Selected room"))
-        details = (
-            f"Room number: {marker.get('room_number') or 'N/A'}\n"
-            f"Building: {marker.get('building') or 'N/A'}\n"
-            f"Floor: {marker.get('floor') if marker.get('floor') is not None else 'N/A'}\n"
-            f"Category: {marker.get('category') or 'Other'}\n\n"
-            f"{marker.get('description') or 'No description available yet.'}"
-        )
-        self.map_info_details.setText(details)
+    def reset_route(self) -> None:
+        """Clear the active walking route."""
+        self.current_route = []
+        self.map_canvas.clear_route()
+        self.map_info_title.setText("Select a route")
+        self.map_route_info_label.setText("Choose a start and destination, then tap Find Route.")
 
-    def _room_to_marker(self, room) -> dict | None:
-        """Convert a repository room row into a marker dictionary."""
-        marker = dict(room)
-        if marker.get("x_coord") is None or marker.get("y_coord") is None:
-            return None
-        try:
-            marker["x_coord"] = float(marker["x_coord"])
-            marker["y_coord"] = float(marker["y_coord"])
-        except (TypeError, ValueError):
-            return None
-        return marker
+    def _handle_landmark_click(self, landmark: str) -> None:
+        """Show clicked landmark context in the route info panel."""
+        self.map_info_title.setText(landmark)
+        self.map_route_info_label.setText("Use this place as your start or destination from the route controls.")
+
+    def _distance(self, first: str, second: str) -> float:
+        """Return Euclidean distance between two normalized landmarks."""
+        x1, y1 = self.landmarks[first]
+        x2, y2 = self.landmarks[second]
+        return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+
+    def _route_distance(self, route: list[str]) -> float:
+        """Return the total route distance in normalized map units."""
+        return sum(
+            self._distance(route[index], route[index + 1])
+            for index in range(len(route) - 1)
+        )
 
     def _apply_styles(self) -> None:
-        """Apply ECU public dashboard styling to the map screen."""
+        """Apply ECU public dashboard styling to the navigation map screen."""
         self.setStyleSheet(
             f"""
             QWidget#map_screen {{
@@ -497,49 +469,44 @@ class MapScreen(QWidget):
                 {font(16, 600)}
             }}
 
-            QLineEdit#map_search_input {{
+            QFrame#map_controls_panel,
+            QFrame#map_info_panel {{
                 background-color: {WHITE};
-                color: {TEXT_DARK};
-                border: 1px solid rgba(92, 107, 128, 80);
-                border-radius: {px(18)};
-                padding: 0 {px(CARD_PADDING)};
-                {font(16, 650)}
+                border: 1px solid rgba(92, 107, 128, 70);
+                border-radius: {px(CARD_RADIUS)};
             }}
 
-            QLineEdit#map_search_input:focus {{
-                border: 2px solid {GOLD};
+            QComboBox {{
+                background-color: {OFF_WHITE};
+                color: {TEXT_DARK};
+                border: 1px solid rgba(92, 107, 128, 80);
+                border-radius: {px(16)};
+                padding: 0 {px(CARD_PADDING)};
+                {font(15, 750)}
             }}
 
             QPushButton {{
-                background-color: {WHITE};
-                color: {TEXT_DARK};
-                border: 1px solid rgba(92, 107, 128, 70);
+                background-color: {NAVY};
+                color: {WHITE};
+                border: none;
                 border-radius: {px(16)};
-                padding: 0 {px(16)};
-                {font(14, 750)}
+                padding: 0 {px(18)};
+                {font(15, 800)}
             }}
 
             QPushButton:hover {{
-                border-color: {GOLD};
-                background-color: {OFF_WHITE};
+                background-color: {NAVY_LIGHT};
             }}
 
-            QPushButton:checked {{
-                background-color: {NAVY};
-                border-color: {NAVY};
-                color: {WHITE};
+            QPushButton:pressed {{
+                background-color: {GOLD_LIGHT};
+                color: {TEXT_DARK};
             }}
 
             QWidget#map_canvas {{
                 background-color: #ECE8DC;
                 border: 1px solid rgba(92, 107, 128, 70);
                 border-radius: {px(CARD_RADIUS + 4)};
-            }}
-
-            QFrame#map_info_panel {{
-                background-color: {WHITE};
-                border: 1px solid rgba(92, 107, 128, 70);
-                border-radius: {px(CARD_RADIUS)};
             }}
 
             QLabel#map_info_eyebrow {{
@@ -552,10 +519,9 @@ class MapScreen(QWidget):
                 {font(24, 850)}
             }}
 
-            QLabel#map_info_message,
-            QLabel#map_info_details {{
+            QLabel#map_route_info_label {{
                 color: {TEXT_MUTED};
-                {font(15, 600)}
+                {font(15, 650)}
             }}
             """
         )

@@ -3,6 +3,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
@@ -31,6 +32,13 @@ from ui.public.theme import (
 
 class HomeScreen(QWidget):
     """Show the public dashboard welcome header and large action tiles."""
+
+    QUICK_ASK_QUESTIONS = (
+        "Where is the library?",
+        "How can I find my classroom?",
+        "Who can help me with admissions?",
+        "What events are available today?",
+    )
 
     def __init__(self, parent_window=None) -> None:
         """Build the home screen and optionally connect tile callbacks."""
@@ -90,6 +98,19 @@ class HomeScreen(QWidget):
         main_tiles.addWidget(self.home_info_tile, 0, 2)
         page_layout.addLayout(main_tiles, stretch=2)
 
+        self.quick_ask_section = QWidget()
+        self.quick_ask_section.setObjectName("quick_ask_section")
+        quick_ask_layout = QHBoxLayout(self.quick_ask_section)
+        quick_ask_layout.setContentsMargins(0, 0, 0, 0)
+        quick_ask_layout.setSpacing(12)
+        self.quick_ask_chips: list[QPushButton] = []
+        for index, question in enumerate(self.QUICK_ASK_QUESTIONS, start=1):
+            chip = self._create_quick_ask_chip(index, question)
+            self.quick_ask_chips.append(chip)
+            setattr(self, f"quick_ask_chip_{index}", chip)
+            quick_ask_layout.addWidget(chip)
+        page_layout.addWidget(self.quick_ask_section)
+
         secondary_tiles = QGridLayout()
         secondary_tiles.setSpacing(14)
         self.home_staff_tile = self._create_tile(
@@ -141,6 +162,24 @@ class HomeScreen(QWidget):
         if callback is not None:
             button.clicked.connect(callback)
         return button
+
+    def _create_quick_ask_chip(self, index: int, question: str) -> QPushButton:
+        """Create one suggested chatbot question chip."""
+        chip = QPushButton(question)
+        chip.setObjectName(f"quick_ask_chip_{index}")
+        chip.setProperty("tileRole", "quickAsk")
+        chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        chip.setMinimumHeight(TOUCH_BUTTON_HEIGHT)
+        chip.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        callback = getattr(self.parent_window, "open_chat_with_question", None)
+        if callback is not None:
+            chip.clicked.connect(
+                lambda checked=False, text=question: callback(text)
+            )
+        return chip
 
     def _apply_styles(self) -> None:
         """Apply the shared ECU public dashboard visual language."""
@@ -198,6 +237,29 @@ class HomeScreen(QWidget):
 
             QPushButton[tileRole="secondary"]:pressed {{
                 background-color: {NAVY_DARK};
+            }}
+
+            QWidget#quick_ask_section {{
+                background-color: transparent;
+            }}
+
+            QPushButton[tileRole="quickAsk"] {{
+                background-color: rgba(255, 255, 255, 24);
+                color: {OFF_WHITE};
+                border: 1px solid rgba(244, 201, 93, 150);
+                border-radius: {px(TOUCH_BUTTON_HEIGHT // 2)};
+                padding: 0 {px(18)};
+                text-align: left;
+                {font(14, 700)}
+            }}
+
+            QPushButton[tileRole="quickAsk"]:hover {{
+                background-color: {NAVY_LIGHT};
+                border-color: {GOLD_LIGHT};
+            }}
+
+            QPushButton[tileRole="quickAsk"]:pressed {{
+                background-color: {NAVY};
             }}
             """
         )

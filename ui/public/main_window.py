@@ -59,6 +59,7 @@ class PublicMainWindow(QMainWindow):
         self.current_language = "en"
         self.setObjectName("public_main_window")
         self.setMinimumSize(1280, 800)
+        self.pending_chat_question: str | None = None
         self.sidebar_buttons: dict[str, QPushButton] = {}
         self.placeholder_pages: dict[str, PlaceholderPage] = {}
         self._build_ui()
@@ -303,6 +304,11 @@ class PublicMainWindow(QMainWindow):
             "Please contact the nearest staff member in urgent situations."
         )
         QMessageBox.information(self, "Emergency Help", message)
+
+    def open_chat_with_question(self, question: str) -> None:
+        """Store a suggested question for the future chatbot screen."""
+        self.pending_chat_question = question
+        self.show_chat()
 
     def set_active_nav(self, key: str) -> None:
         """Mark one visual sidebar item as the active section."""

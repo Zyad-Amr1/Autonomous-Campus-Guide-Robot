@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.public.screens.home_screen import HomeScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
     APP_BACKGROUND_STYLE,
@@ -44,7 +45,6 @@ class PublicMainWindow(QMainWindow):
     )
 
     _PLACEHOLDER_PAGES = (
-        ("home", "HOME"),
         ("map", "MAP"),
         ("staff", "STAFF"),
         ("schedule", "TIME"),
@@ -231,6 +231,18 @@ class PublicMainWindow(QMainWindow):
             }}
             """
         )
+        self.home_screen = HomeScreen(
+            {
+                "map": self.show_map,
+                "chat": self.show_chat,
+                "about": self.show_about,
+                "staff": self.show_staff,
+                "schedule": self.show_schedule,
+                "news": self.show_news,
+            }
+        )
+        page_stack.addWidget(self.home_screen)
+
         for key, icon in self._PLACEHOLDER_PAGES:
             page = PlaceholderPage("", "", icon)
             self.placeholder_pages[key] = page
@@ -256,6 +268,7 @@ class PublicMainWindow(QMainWindow):
         self.setLayoutDirection(direction)
         self.centralWidget().setLayoutDirection(direction)
         self.public_page_stack.setLayoutDirection(direction)
+        self.home_screen.setLayoutDirection(direction)
         self.setWindowTitle(translations["app_title"].replace("\n", " "))
         self.app_title_label.setText(translations["app_title"])
         self.app_subtitle_label.setText(translations["app_subtitle"])

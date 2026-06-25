@@ -231,16 +231,7 @@ class PublicMainWindow(QMainWindow):
             }}
             """
         )
-        self.home_screen = HomeScreen(
-            {
-                "map": self.show_map,
-                "chat": self.show_chat,
-                "about": self.show_about,
-                "staff": self.show_staff,
-                "schedule": self.show_schedule,
-                "news": self.show_news,
-            }
-        )
+        self.home_screen = HomeScreen(self)
         page_stack.addWidget(self.home_screen)
 
         for key, icon in self._PLACEHOLDER_PAGES:

@@ -1,7 +1,5 @@
 """Modern touch-first home screen for the ECU public dashboard."""
 
-from collections.abc import Callable
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -34,13 +32,10 @@ from ui.public.theme import (
 class HomeScreen(QWidget):
     """Show the public dashboard welcome header and large action tiles."""
 
-    def __init__(
-        self,
-        navigation_callbacks: dict[str, Callable[[], None]] | None = None,
-    ) -> None:
+    def __init__(self, parent_window=None) -> None:
         """Build the home screen and optionally connect tile callbacks."""
         super().__init__()
-        self.navigation_callbacks = navigation_callbacks or {}
+        self.parent_window = parent_window
         self.setObjectName("public_home_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
@@ -142,7 +137,7 @@ class HomeScreen(QWidget):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        callback = self.navigation_callbacks.get(navigation_key)
+        callback = getattr(self.parent_window, f"show_{navigation_key}", None)
         if callback is not None:
             button.clicked.connect(callback)
         return button

@@ -11,7 +11,6 @@ from ui.public.screens.home_screen import HomeScreen
 
 
 def _get_application() -> QApplication:
-    """Return the shared Qt application required to construct widgets."""
     application = QApplication.instance()
     if application is None:
         application = QApplication([])
@@ -33,84 +32,74 @@ def test_home_screen_has_required_object_names() -> None:
     screen = HomeScreen()
     try:
         assert application is not None
-        assert screen.home_welcome_title.text() == "Welcome to ECU Smart Assistant"
-        assert (
-            screen.home_welcome_subtitle.text()
-            == "Find your way, ask questions, and explore university information."
-        )
-        for object_name, widget_type in (
-            ("home_welcome_title", QLabel),
-            ("home_welcome_subtitle", QLabel),
-            ("home_map_tile", QPushButton),
-            ("home_chat_tile", QPushButton),
-            ("home_info_tile", QPushButton),
-            ("home_staff_tile", QPushButton),
-            ("home_schedule_tile", QPushButton),
-            ("home_news_tile", QPushButton),
-            ("home_about_tile", QPushButton),
-        ):
-            assert screen.findChild(widget_type, object_name) is not None
+        assert screen.findChild(QLabel, "home_title") is not None
+        assert screen.findChild(QLabel, "home_subtitle") is not None
+        assert screen.findChild(QPushButton, "home_info_card") is not None
+        assert screen.findChild(QPushButton, "home_chatbot_card") is not None
+        assert screen.findChild(QPushButton, "home_map_card") is not None
     finally:
         screen.close()
 
 
-def test_home_screen_main_tiles_are_touch_friendly() -> None:
+def test_home_has_exactly_three_main_cards() -> None:
     application = _get_application()
     screen = HomeScreen()
     try:
         assert application is not None
-        for tile in (
-            screen.home_map_tile,
-            screen.home_chat_tile,
-            screen.home_info_tile,
+        cards = screen.findChildren(QPushButton)
+        assert [card.objectName() for card in cards] == [
+            "home_info_card",
+            "home_chatbot_card",
+            "home_map_card",
+        ]
+    finally:
+        screen.close()
+
+
+def test_home_cards_are_touch_friendly() -> None:
+    application = _get_application()
+    screen = HomeScreen()
+    try:
+        assert application is not None
+        for card in (
+            screen.home_info_card,
+            screen.home_chatbot_card,
+            screen.home_map_card,
         ):
-            assert tile.minimumHeight() >= 100
+            assert card.minimumHeight() >= 240
             assert (
-                tile.sizePolicy().horizontalPolicy()
+                card.sizePolicy().horizontalPolicy()
                 == QSizePolicy.Policy.Expanding
             )
     finally:
         screen.close()
 
 
-def test_public_main_window_index_zero_is_home_screen() -> None:
+def test_public_main_window_index_one_is_home_screen() -> None:
     application = _get_application()
     window = PublicMainWindow()
     try:
         assert application is not None
-        assert isinstance(window.public_page_stack.widget(0), HomeScreen)
-        assert window.public_page_stack.currentIndex() == 0
-    finally:
-        window.close()
-
-
-def test_home_tile_navigation_uses_existing_public_pages() -> None:
-    application = _get_application()
-    window = PublicMainWindow()
-    try:
-        assert application is not None
-        window.home_screen.home_map_tile.click()
+        assert isinstance(window.public_page_stack.widget(1), HomeScreen)
+        window.select_language("en")
         assert window.public_page_stack.currentIndex() == 1
-        window.show_home()
-        window.home_screen.home_chat_tile.click()
-        assert window.public_page_stack.currentIndex() == 6
-        window.show_home()
-        window.home_screen.home_staff_tile.click()
-        assert window.public_page_stack.currentIndex() == 2
     finally:
         window.close()
 
 
-def test_existing_navigation_still_works_with_home_screen() -> None:
+def test_home_card_navigation_uses_public_pages() -> None:
     application = _get_application()
     window = PublicMainWindow()
     try:
         assert application is not None
-        window.sidebar_schedule_button.click()
+        window.select_language("en")
+        window.home_screen.home_info_card.click()
         assert window.public_page_stack.currentIndex() == 3
-        window.floating_ask_button.click()
-        assert window.public_page_stack.currentIndex() == 6
-        window.sidebar_home_button.click()
-        assert window.public_page_stack.currentIndex() == 0
+        window.show_home()
+        window.home_screen.home_chatbot_card.click()
+        assert window.public_page_stack.currentIndex() == 4
+        window.show_home()
+        window.home_screen.home_map_card.click()
+        assert window.public_page_stack.currentIndex() == 2
     finally:
         window.close()

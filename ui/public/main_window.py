@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from ui.public.screens.admin_gate_screen import AdminGateScreen
 from ui.public.screens.data_dashboard_screen import DataDashboardScreen
 from ui.public.screens.home_screen import HomeScreen
+from ui.public.screens.language_screen import LanguageSelectionScreen
 from ui.public.screens.map_screen import MapScreen
 from ui.public.screens.placeholder_page import PlaceholderPage
 from ui.public.theme import (
@@ -42,25 +43,21 @@ from ui.public.translations import TRANSLATIONS
 
 
 class PublicMainWindow(QMainWindow):
-    """Display seven lightweight public placeholders with sidebar navigation."""
+    """Display the public kiosk onboarding and navigation shell."""
 
     _SIDEBAR_ITEMS = (
         ("home", "sidebar_home_button"),
         ("map", "sidebar_map_button"),
-        ("staff", "sidebar_staff_button"),
-        ("schedule", "sidebar_schedule_button"),
-        ("news", "sidebar_news_button"),
-        ("about", "sidebar_about_button"),
         ("chat", "sidebar_chat_button"),
         ("data", "sidebar_data_button"),
     )
 
     _PLACEHOLDER_PAGES = (
+        ("about", "INFO"),
+        ("chat", "CHAT"),
         ("staff", "STAFF"),
         ("schedule", "TIME"),
         ("news", "NEWS"),
-        ("about", "INFO"),
-        ("chat", "CHAT"),
     )
 
     def __init__(self) -> None:
@@ -74,7 +71,7 @@ class PublicMainWindow(QMainWindow):
         self.placeholder_pages: dict[str, PlaceholderPage] = {}
         self._build_ui()
         self.apply_language()
-        self.show_home()
+        self.show_language_selection()
 
     def _build_ui(self) -> None:
         """Build the lightweight two-column public navigation shell."""
@@ -94,6 +91,7 @@ class PublicMainWindow(QMainWindow):
         shell_layout.setSpacing(0)
 
         sidebar = self._create_sidebar()
+        self.sidebar = sidebar
         content = self._create_content()
         shell_layout.addWidget(sidebar)
         shell_layout.addWidget(content, stretch=1)
@@ -144,12 +142,12 @@ class PublicMainWindow(QMainWindow):
             sidebar_layout.addWidget(button)
 
         sidebar_layout.addStretch()
-        footer = QLabel("Egyptian Chinese University")
-        footer.setObjectName("public_sidebar_footer")
-        footer.setWordWrap(True)
-        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setStyleSheet(f"color: #9CA3AF; {font(11, 650)}")
-        sidebar_layout.addWidget(footer)
+        self.sidebar_footer_label = QLabel("Egyptian Chinese University")
+        self.sidebar_footer_label.setObjectName("public_sidebar_footer")
+        self.sidebar_footer_label.setWordWrap(True)
+        self.sidebar_footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sidebar_footer_label.setStyleSheet(f"color: #9CA3AF; {font(11, 650)}")
+        sidebar_layout.addWidget(self.sidebar_footer_label)
         return sidebar
 
     def _create_content(self) -> QFrame:
@@ -168,7 +166,8 @@ class PublicMainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        content_layout.addWidget(self._create_header())
+        self.header = self._create_header()
+        content_layout.addWidget(self.header)
         self.public_page_stack = self._create_page_stack()
         content_layout.addWidget(self.public_page_stack, stretch=1)
 
@@ -213,7 +212,10 @@ class PublicMainWindow(QMainWindow):
             lambda checked=False: self.show_chat()
         )
         floating_row.addWidget(self.floating_ask_button)
-        content_layout.addLayout(floating_row)
+        self.floating_actions_widget = QWidget()
+        self.floating_actions_widget.setObjectName("floating_actions_widget")
+        self.floating_actions_widget.setLayout(floating_row)
+        content_layout.addWidget(self.floating_actions_widget)
         return content
 
     def _create_header(self) -> QFrame:
@@ -260,7 +262,7 @@ class PublicMainWindow(QMainWindow):
         return header
 
     def _create_page_stack(self) -> QStackedWidget:
-        """Create exactly seven themed blank placeholder pages."""
+        """Create the language-first public page stack."""
         page_stack = QStackedWidget()
         page_stack.setObjectName("public_page_stack")
         page_stack.setStyleSheet(
@@ -271,6 +273,8 @@ class PublicMainWindow(QMainWindow):
             }}
             """
         )
+        self.language_screen = LanguageSelectionScreen(self)
+        page_stack.addWidget(self.language_screen)
         self.home_screen = HomeScreen(self)
         page_stack.addWidget(self.home_screen)
         self.map_screen = MapScreen()
@@ -290,6 +294,14 @@ class PublicMainWindow(QMainWindow):
         """Switch between English and Arabic public dashboard copy."""
         self.current_language = "ar" if self.current_language == "en" else "en"
         self.apply_language()
+
+    def select_language(self, language: str) -> None:
+        """Apply the selected language and enter the public home screen."""
+        if language not in TRANSLATIONS:
+            language = "en"
+        self.current_language = language
+        self.apply_language()
+        self.show_home()
 
     def tr(self, key: str) -> str:
         """Return translated public dashboard copy for the active language."""
@@ -316,6 +328,7 @@ class PublicMainWindow(QMainWindow):
         self.map_screen.setLayoutDirection(direction)
         self.admin_gate_screen.setLayoutDirection(direction)
         self.data_dashboard_screen.setLayoutDirection(direction)
+        self.language_screen.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.setWindowTitle(translations["app_title"].replace("\n", " "))
         self.app_title_label.setText(translations["app_title"])
         self.app_subtitle_label.setText(translations["app_subtitle"])
@@ -323,6 +336,7 @@ class PublicMainWindow(QMainWindow):
         self.header_subtitle_label.setText(translations["header_subtitle"])
         self.header_home_button.setText(translations["header_home"])
         self.language_toggle_button.setText(translations["language_toggle"])
+        self.sidebar_footer_label.setText(translations["sidebar_footer"])
         self.floating_ask_button.setText(translations["ask_me"])
         self.emergency_help_button.setText(translations["help"])
         self.floating_ask_button.setLayoutDirection(direction)
@@ -377,39 +391,52 @@ class PublicMainWindow(QMainWindow):
         """Switch to one placeholder and synchronize the active nav item."""
         self.public_page_stack.setCurrentIndex(index)
         self.set_active_nav(key)
+        self._set_shell_visible(index != 0)
+
+    def _set_shell_visible(self, visible: bool) -> None:
+        """Show public navigation only after the language choice."""
+        self.sidebar.setVisible(visible)
+        self.header.setVisible(visible)
+        self.floating_actions_widget.setVisible(visible)
+
+    def show_language_selection(self) -> None:
+        """Show the first-run language selection screen."""
+        self.public_page_stack.setCurrentIndex(0)
+        self.set_active_nav("")
+        self._set_shell_visible(False)
 
     def show_home(self) -> None:
         """Show the Home placeholder."""
-        self._show_page(0, "home")
+        self._show_page(1, "home")
 
     def show_map(self) -> None:
         """Show the Campus Map placeholder."""
-        self._show_page(1, "map")
+        self._show_page(2, "map")
 
     def show_staff(self) -> None:
         """Show the Staff Directory placeholder."""
-        self._show_page(2, "staff")
+        self._show_page(5, "staff")
 
     def show_schedule(self) -> None:
         """Show the Schedule placeholder."""
-        self._show_page(3, "schedule")
+        self._show_page(6, "schedule")
 
     def show_news(self) -> None:
         """Show the Events and News placeholder."""
-        self._show_page(4, "news")
+        self._show_page(7, "news")
 
     def show_about(self) -> None:
         """Show the About ECU placeholder."""
-        self._show_page(5, "about")
+        self._show_page(3, "about")
 
     def show_chat(self) -> None:
         """Show the Chat Assistant placeholder."""
-        self._show_page(6, "chat")
+        self._show_page(4, "chat")
 
     def show_data(self) -> None:
         """Show the protected public data access gate."""
-        self._show_page(7, "data")
+        self._show_page(8, "data")
 
     def show_data_dashboard(self) -> None:
         """Show the protected data dashboard inside the public app."""
-        self._show_page(8, "data")
+        self._show_page(9, "data")

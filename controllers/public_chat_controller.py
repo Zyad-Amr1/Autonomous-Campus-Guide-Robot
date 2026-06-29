@@ -10,6 +10,11 @@ from typing import Any, Callable
 import requests
 
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
+from controllers.rag.knowledge_store import (
+    init_knowledge_store,
+    load_knowledge_chunks,
+    search_knowledge_chunks,
+)
 from controllers.rag.prompt_builder import (
     ARABIC_INSUFFICIENT,
     ENGLISH_INSUFFICIENT,
@@ -140,8 +145,7 @@ class PublicChatController:
                 "route": "fallback",
             }
 
-        chunks = build_knowledge_chunks(self.db_path)
-        retrieved_chunks = retrieve_relevant_chunks(cleaned_question, chunks)
+        retrieved_chunks = self._retrieve_chunks(cleaned_question)
         sources = self._sources_from_chunks(retrieved_chunks)
 
         if not retrieved_chunks:
@@ -256,3 +260,11 @@ class PublicChatController:
             }
             for chunk in chunks
         ]
+
+    def _retrieve_chunks(self, question: str) -> list[dict[str, Any]]:
+        """Retrieve from persistent store first, then direct DB chunks if empty."""
+        init_knowledge_store(self.db_path)
+        stored_chunks = load_knowledge_chunks(self.db_path)
+        if stored_chunks:
+            return search_knowledge_chunks(question, self.db_path)
+        return retrieve_relevant_chunks(question, build_knowledge_chunks(self.db_path))

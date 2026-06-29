@@ -12,6 +12,7 @@ from controllers.public_chat_controller import (
     load_groq_config,
 )
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
+from controllers.rag.knowledge_store import init_knowledge_store, upsert_knowledge_chunks
 from controllers.rag.prompt_builder import build_rag_prompt, detect_language
 from controllers.rag.retriever import retrieve_relevant_chunks
 from database.init_db import initialize_database
@@ -178,6 +179,45 @@ def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> Non
     assert result["answer"] == ARABIC_NO_CONTEXT
 
 
+def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    db_path = _db(tmp_path)
+    upsert_knowledge_chunks(
+        db_path,
+        [
+            {
+                "id": "rooms:custom",
+                "source": "rooms",
+                "title": "Cafeteria",
+                "content": "The cafeteria is beside the Student Center entrance.",
+                "keywords": ["cafeteria", "student", "food"],
+                "language": "en",
+                "metadata": {"origin": "test"},
+            }
+        ],
+    )
+    controller = PublicChatController(db_path=db_path)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert result["route"] == "rag_fallback"
+    assert result["sources"][0]["id"] == "rooms:custom"
+    assert "Student Center entrance" in result["answer"]
+
+
+def test_empty_knowledge_chunks_falls_back_to_database_rows(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    db_path = _db(tmp_path)
+    init_knowledge_store(db_path)
+    controller = PublicChatController(db_path=db_path)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert result["route"] == "rag_fallback"
+    assert result["sources"][0]["source"] == "rooms"
+    assert "Cafeteria" in result["answer"]
+
+
 def test_answer_question_uses_fake_llm_provider_when_provided(tmp_path) -> None:
     calls: list[list[dict[str, str]]] = []
 
@@ -285,4 +325,3 @@ def test_groq_provider_reads_environment(monkeypatch) -> None:
     assert provider is not None
     assert provider.api_key == "test-key"
     assert provider.model == "openai/gpt-oss-120b"
-

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.public.screens.admin_gate_screen import AdminGateScreen
+from ui.public.screens.chat_screen import ChatScreen
 from ui.public.screens.data_dashboard_screen import DataDashboardScreen
 from ui.public.screens.home_screen import HomeScreen
 from ui.public.screens.language_screen import LanguageSelectionScreen
@@ -54,7 +55,6 @@ class PublicMainWindow(QMainWindow):
 
     _PLACEHOLDER_PAGES = (
         ("about", "INFO"),
-        ("chat", "CHAT"),
         ("staff", "STAFF"),
         ("schedule", "TIME"),
         ("news", "NEWS"),
@@ -280,7 +280,13 @@ class PublicMainWindow(QMainWindow):
         self.map_screen = MapScreen()
         page_stack.addWidget(self.map_screen)
 
-        for key, icon in self._PLACEHOLDER_PAGES:
+        about_page = PlaceholderPage("", "", "INFO")
+        self.placeholder_pages["about"] = about_page
+        page_stack.addWidget(about_page)
+        self.chat_screen = ChatScreen(parent_window=self)
+        page_stack.addWidget(self.chat_screen)
+
+        for key, icon in self._PLACEHOLDER_PAGES[1:]:
             page = PlaceholderPage("", "", icon)
             self.placeholder_pages[key] = page
             page_stack.addWidget(page)
@@ -326,6 +332,7 @@ class PublicMainWindow(QMainWindow):
         self.header_home_button.setLayoutDirection(direction)
         self.home_screen.setLayoutDirection(direction)
         self.map_screen.setLayoutDirection(direction)
+        self.chat_screen.setLayoutDirection(direction)
         self.admin_gate_screen.setLayoutDirection(direction)
         self.data_dashboard_screen.setLayoutDirection(direction)
         self.language_screen.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
@@ -364,6 +371,7 @@ class PublicMainWindow(QMainWindow):
             )
         self.home_screen.update_language(translations)
         self.map_screen.update_language(translations)
+        self.chat_screen.update_language(translations)
         self.admin_gate_screen.update_language(translations)
         self.data_dashboard_screen.update_language(translations)
 
@@ -430,8 +438,12 @@ class PublicMainWindow(QMainWindow):
         self._show_page(3, "about")
 
     def show_chat(self) -> None:
-        """Show the Chat Assistant placeholder."""
+        """Show the dynamic Chat Assistant screen."""
         self._show_page(4, "chat")
+        if self.pending_chat_question:
+            question = self.pending_chat_question
+            self.pending_chat_question = None
+            self.chat_screen.handle_pending_question(question)
 
     def show_data(self) -> None:
         """Show the protected public data access gate."""

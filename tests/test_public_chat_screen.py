@@ -30,6 +30,15 @@ def _get_application() -> QApplication:
     return application
 
 
+def _process_until(predicate, timeout_ms: int = 2000) -> None:
+    application = _get_application()
+    deadline = timeout_ms
+    while deadline > 0 and not predicate():
+        application.processEvents()
+        deadline -= 10
+    application.processEvents()
+
+
 def test_chat_screen_can_be_created() -> None:
     application = _get_application()
     screen = ChatScreen(controller=FakeChatController())
@@ -66,6 +75,7 @@ def test_sending_message_adds_user_and_bot_messages() -> None:
         initial_count = len(screen.message_labels)
         screen.chat_input.setText("Where is cafeteria?")
         screen.send_message()
+        _process_until(lambda: len(screen.message_labels) == initial_count + 2)
         assert controller.questions == ["Where is cafeteria?"]
         assert screen.chat_input.text() == ""
         assert len(screen.message_labels) == initial_count + 2
@@ -83,6 +93,7 @@ def test_suggestion_button_sends_question() -> None:
     try:
         assert application is not None
         screen.chat_suggestion_2.click()
+        _process_until(lambda: controller.questions == ["Tell me about faculties"])
         assert controller.questions == ["Tell me about faculties"]
     finally:
         screen.close()
@@ -95,9 +106,9 @@ def test_pending_question_is_not_duplicated() -> None:
     try:
         assert application is not None
         screen.handle_pending_question("Who are the professors?")
-        QApplication.processEvents()
+        _process_until(lambda: controller.questions == ["Who are the professors?"])
         screen.handle_pending_question("Who are the professors?")
-        QApplication.processEvents()
+        _process_until(lambda: len(controller.questions) == 1)
         assert controller.questions == ["Who are the professors?"]
     finally:
         screen.close()

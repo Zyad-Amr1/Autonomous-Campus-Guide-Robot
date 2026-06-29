@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -41,6 +41,24 @@ SUGGESTED_QUESTIONS = (
 )
 
 
+class ChatAnswerWorker(QObject):
+    """Run chatbot answer generation away from the GUI thread."""
+
+    finished = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, controller: PublicChatController, question: str) -> None:
+        super().__init__()
+        self.controller = controller
+        self.question = question
+
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.controller.answer_question(self.question))
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class ChatScreen(QWidget):
     """Modern public chat interface backed by university database context."""
 
@@ -53,6 +71,8 @@ class ChatScreen(QWidget):
         self.controller = controller or PublicChatController()
         self.parent_window = parent_window
         self._last_pending_question: str | None = None
+        self._active_threads: list[QThread] = []
+        self._active_workers: list[ChatAnswerWorker] = []
         self.message_labels: list[QLabel] = []
         self._translations: dict[str, str] = {}
         self.setObjectName("chat_screen")
@@ -144,17 +164,48 @@ class ChatScreen(QWidget):
         self.chat_input.clear()
         self.chat_status_label.setText("Searching university data...")
         self.chat_send_button.setEnabled(False)
-        try:
-            result = self.controller.answer_question(question)
-            self.add_bot_message(str(result["answer"]))
-            confidence = str(result.get("confidence", "low"))
-            route = str(result.get("route", "fallback"))
-            self.chat_status_label.setText(f"Answered from {route} ({confidence} confidence).")
-        except Exception:
-            self.add_bot_message("I could not answer safely right now. Please try another question.")
-            self.chat_status_label.setText("Assistant error handled safely.")
-        finally:
-            self.chat_send_button.setEnabled(True)
+        self._start_answer_worker(question)
+
+    def _start_answer_worker(self, question: str) -> None:
+        """Start a background worker for the controller call."""
+        thread = QThread(self)
+        worker = ChatAnswerWorker(self.controller, question)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._handle_answer_result)
+        worker.failed.connect(self._handle_answer_error)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        worker.finished.connect(lambda: self._active_workers.remove(worker) if worker in self._active_workers else None)
+        worker.failed.connect(lambda: self._active_workers.remove(worker) if worker in self._active_workers else None)
+        thread.finished.connect(lambda: self._active_threads.remove(thread) if thread in self._active_threads else None)
+        thread.finished.connect(thread.deleteLater)
+        self._active_threads.append(thread)
+        self._active_workers.append(worker)
+        thread.start()
+
+    def _handle_answer_result(self, result: dict) -> None:
+        """Render a completed bot answer."""
+        self.add_bot_message(str(result["answer"]))
+        confidence = str(result.get("confidence", "low"))
+        route = str(result.get("route", "fallback"))
+        self.chat_status_label.setText(f"Answered from {route} ({confidence} confidence).")
+        self.chat_send_button.setEnabled(True)
+
+    def _handle_answer_error(self, _error: str) -> None:
+        """Render a safe message when answer generation fails unexpectedly."""
+        self.add_bot_message("I could not answer safely right now. Please try another question.")
+        self.chat_status_label.setText("Assistant error handled safely.")
+        self.chat_send_button.setEnabled(True)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Stop active answer workers when the chat widget closes."""
+        for thread in list(self._active_threads):
+            thread.quit()
+            thread.wait(1000)
+        super().closeEvent(event)
 
     def add_user_message(self, text: str) -> QLabel:
         """Append a right-aligned user bubble."""

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import sqlite3
 
-from controllers.public_chat_controller import PublicChatController
+from controllers.public_chat_controller import (
+    ENGLISH_NO_CONTEXT,
+    GroqChatProvider,
+    PublicChatController,
+)
 from controllers.university_context_controller import search_university_context
 from database.init_db import initialize_database
 
@@ -83,7 +87,20 @@ def test_search_university_context_returns_best_snippets(tmp_path) -> None:
     assert "Cafeteria" in results[0]["snippet"]
 
 
-def test_public_chat_controller_returns_dynamic_answer_from_faq_context(tmp_path) -> None:
+def test_no_api_key_uses_fallback(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("Where is student affairs?")
+
+    assert controller.llm_provider is None
+    assert result["route"] == "database_context"
+    assert "Student affairs is in Building B" in result["answer"]
+
+
+def test_public_chat_controller_returns_dynamic_answer_from_faq_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     controller = PublicChatController(db_path=_db(tmp_path))
 
     result = controller.answer_question("Where is student affairs?")
@@ -94,7 +111,8 @@ def test_public_chat_controller_returns_dynamic_answer_from_faq_context(tmp_path
     assert result["sources"][0]["source_type"] == "faq"
 
 
-def test_public_chat_controller_returns_professor_answer(tmp_path) -> None:
+def test_public_chat_controller_returns_professor_answer(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     controller = PublicChatController(db_path=_db(tmp_path))
 
     result = controller.answer_question("Who are the professors?")
@@ -103,7 +121,8 @@ def test_public_chat_controller_returns_professor_answer(tmp_path) -> None:
     assert result["sources"][0]["source_type"] == "professors"
 
 
-def test_public_chat_controller_returns_room_answer(tmp_path) -> None:
+def test_public_chat_controller_returns_room_answer(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     controller = PublicChatController(db_path=_db(tmp_path))
 
     result = controller.answer_question("Where is cafeteria?")
@@ -113,7 +132,8 @@ def test_public_chat_controller_returns_room_answer(tmp_path) -> None:
     assert result["sources"][0]["source_type"] == "rooms"
 
 
-def test_fallback_works_when_no_context_found(tmp_path) -> None:
+def test_fallback_works_when_no_context_found(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     controller = PublicChatController(db_path=_db(tmp_path))
 
     result = controller.answer_question("Tell me about parking permits on Mars")
@@ -121,7 +141,7 @@ def test_fallback_works_when_no_context_found(tmp_path) -> None:
     assert result["route"] == "fallback"
     assert result["confidence"] == "low"
     assert result["sources"] == []
-    assert "I do not have enough information" in result["answer"]
+    assert result["answer"] == ENGLISH_NO_CONTEXT
 
 
 def test_fake_llm_provider_is_called_when_provided(tmp_path) -> None:
@@ -140,7 +160,36 @@ def test_fake_llm_provider_is_called_when_provided(tmp_path) -> None:
     assert result["answer"] == "LLM answer from fake provider."
 
 
-def test_build_prompt_includes_context_and_question(tmp_path) -> None:
+def test_api_failure_falls_back_safely(tmp_path) -> None:
+    calls: list[str] = []
+
+    def failing_provider(prompt: str) -> str:
+        calls.append(prompt)
+        raise RuntimeError("network down")
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=failing_provider)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert calls
+    assert result["route"] == "fallback"
+    assert "Cafeteria" in result["answer"]
+    assert result["sources"][0]["source_type"] == "rooms"
+
+
+def test_groq_provider_reads_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+
+    provider = GroqChatProvider.from_environment()
+
+    assert provider is not None
+    assert provider.api_key == "test-key"
+    assert provider.model == "openai/gpt-oss-120b"
+
+
+def test_build_prompt_includes_context_and_question(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     controller = PublicChatController(db_path=_db(tmp_path))
     context = search_university_context("Where is cafeteria?", controller.db_path)
 

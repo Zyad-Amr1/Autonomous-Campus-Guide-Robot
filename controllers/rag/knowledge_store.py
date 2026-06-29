@@ -69,7 +69,7 @@ _SOURCE_PRIORITY = {
 
 
 def init_knowledge_store(db_path: str | Path = DB_NAME) -> None:
-    """Create the persistent knowledge chunk table if it is missing."""
+    """Create the persistent knowledge chunk and metadata tables if missing."""
     connection = get_connection(db_path)
     try:
         connection.execute(
@@ -83,6 +83,15 @@ def init_knowledge_store(db_path: str | Path = DB_NAME) -> None:
                 language TEXT,
                 metadata TEXT,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rag_sync_status (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT
             )
             """
         )
@@ -219,6 +228,82 @@ def search_knowledge_chunks(
         )
     )
     return results[: max(1, int(limit))]
+
+
+def set_sync_status(db_path: str | Path, key: str, value: str) -> None:
+    """Persist one RAG sync status value without disturbing chunk data."""
+    if not key:
+        return
+    init_knowledge_store(db_path)
+    connection = get_connection(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO rag_sync_status (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (str(key), str(value)),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def get_sync_status(
+    db_path: str | Path,
+    key: str,
+    default: str | None = None,
+) -> str | None:
+    """Read one RAG sync status value, returning default on missing data."""
+    if not key:
+        return default
+    init_knowledge_store(db_path)
+    connection = get_connection(db_path)
+    try:
+        row = connection.execute(
+            "SELECT value FROM rag_sync_status WHERE key = ?",
+            (str(key),),
+        ).fetchone()
+    finally:
+        connection.close()
+    return row["value"] if row is not None else default
+
+
+def mark_knowledge_dirty(db_path: str | Path, reason: str) -> None:
+    """Mark persisted knowledge as stale after source data changes."""
+    set_sync_status(db_path, "knowledge_dirty", "true")
+    set_sync_status(db_path, "dirty_reason", reason or "Knowledge source data changed")
+
+
+def clear_knowledge_dirty(db_path: str | Path) -> None:
+    """Mark persisted knowledge as up to date."""
+    set_sync_status(db_path, "knowledge_dirty", "false")
+    set_sync_status(db_path, "dirty_reason", "")
+
+
+def is_knowledge_dirty(db_path: str | Path) -> bool:
+    """Return whether persisted knowledge has been marked stale."""
+    return str(get_sync_status(db_path, "knowledge_dirty", "false")).casefold() == "true"
+
+
+def get_knowledge_status_summary(db_path: str | Path = DB_NAME) -> dict[str, Any]:
+    """Return chunk and freshness status suitable for UI/debug display."""
+    chunks = load_knowledge_chunks(db_path)
+    sources: dict[str, int] = {}
+    for chunk in chunks:
+        source = str(chunk.get("source") or "unknown")
+        sources[source] = sources.get(source, 0) + 1
+    return {
+        "dirty": is_knowledge_dirty(db_path),
+        "dirty_reason": get_sync_status(db_path, "dirty_reason", "") or "",
+        "last_database_sync": get_sync_status(db_path, "last_database_sync", "") or "",
+        "last_external_sync": get_sync_status(db_path, "last_external_sync", "") or "",
+        "chunk_count": len(chunks),
+        "sources": sources,
+    }
 
 
 def _row_to_chunk(row) -> dict[str, Any]:

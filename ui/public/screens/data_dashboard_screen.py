@@ -41,6 +41,11 @@ from controllers.professor_csv_controller import (
 from controllers.public_chat_controller import PublicChatController, load_groq_config
 from controllers.rag.evaluator import run_chatbot_evaluation
 from controllers.rag.knowledge_store import load_knowledge_chunks
+from controllers.rag.knowledge_store import (
+    clear_knowledge_dirty,
+    get_knowledge_status_summary,
+    mark_knowledge_dirty,
+)
 from controllers.rag.document_ingestor import SUPPORTED_EXTENSIONS
 from controllers.rag.source_config import (
     add_web_source,
@@ -458,6 +463,7 @@ class DataDashboardScreen(QWidget):
             self._set_status(f"Some rows could not be imported: {error}")
         else:
             self._set_status(self._format_import_result(result))
+            self._mark_knowledge_dirty("CSV import completed")
         self.load_selected_dataset()
 
     def export_csv(self) -> None:
@@ -508,6 +514,8 @@ class DataDashboardScreen(QWidget):
             self._set_status(f"Could not delete row: {error}")
             return
         self._set_status("Deleted selected row." if deleted else "Row was not found.")
+        if deleted:
+            self._mark_knowledge_dirty(f"{self.data_dataset_selector.currentText()} data changed")
         self.load_selected_dataset()
 
     def save_edits(self) -> None:
@@ -528,6 +536,8 @@ class DataDashboardScreen(QWidget):
             self.load_selected_dataset()
             return
         self._set_status(f"Saved edits for {saved} row(s).")
+        if saved:
+            self._mark_knowledge_dirty(f"{dataset_name} data changed")
         self.load_selected_dataset()
 
     def sync_database_knowledge(self) -> None:
@@ -538,6 +548,7 @@ class DataDashboardScreen(QWidget):
             self._set_kb_status(f"Could not sync database knowledge: {error}")
             return
         chunks_created = int(result.get("chunks_created", 0))
+        self._clear_knowledge_dirty()
         self._last_sync_status = f"Database sync: {chunks_created} chunk(s)."
         self._set_kb_status(f"Synced {chunks_created} database knowledge chunk(s).")
 
@@ -557,6 +568,8 @@ class DataDashboardScreen(QWidget):
         )
         if errors:
             message += f" Some sources need attention: {len(errors)} issue(s)."
+        else:
+            self._clear_knowledge_dirty()
         self._last_sync_status = message
         self._set_kb_status(message)
 
@@ -574,6 +587,9 @@ class DataDashboardScreen(QWidget):
         database_chunks = int(database_result.get("chunks_created", 0))
         website_chunks = int(external_result.get("website_chunks", 0))
         document_chunks = int(external_result.get("document_chunks", 0))
+        errors = external_result.get("errors") or []
+        if not errors:
+            self._clear_knowledge_dirty()
         self._set_kb_status(
             "Rebuilt knowledge base: "
             f"{database_chunks} database, {website_chunks} website, "
@@ -585,23 +601,26 @@ class DataDashboardScreen(QWidget):
         )
 
     def show_knowledge_status(self) -> None:
-        """Show persisted chunk counts grouped by source."""
+        """Show persisted chunk counts and freshness metadata."""
         try:
-            chunks = load_knowledge_chunks(self.db_path)
+            summary = get_knowledge_status_summary(self.db_path)
         except Exception as error:
             self._set_kb_status(f"Could not read knowledge status: {error}")
             return
-        if not chunks:
-            self._set_kb_status("Knowledge base has no chunks yet.")
-            return
-        counts: dict[str, int] = {}
-        for chunk in chunks:
-            source = str(chunk.get("source") or "unknown")
-            counts[source] = counts.get(source, 0) + 1
+        sources = summary.get("sources", {})
         grouped = ", ".join(
             f"{source}: {count}" for source, count in sorted(counts.items())
+        ) if (counts := dict(sources)) else "none"
+        status = "Outdated" if summary.get("dirty") else "Up to date"
+        reason = summary.get("dirty_reason") or "None"
+        last_database_sync = summary.get("last_database_sync") or "Never"
+        last_external_sync = summary.get("last_external_sync") or "Never"
+        self._set_kb_status(
+            f"Knowledge Base: {summary.get('chunk_count', 0)} chunks | "
+            f"Sources: {grouped} | Status: {status} | Reason: {reason} | "
+            f"Last database sync: {last_database_sync} | "
+            f"Last external sync: {last_external_sync}"
         )
-        self._set_kb_status(f"Knowledge chunks: {len(chunks)} total ({grouped}).")
 
     def refresh_sources_table(self) -> None:
         """Refresh configured website sources and compact source counts."""
@@ -631,6 +650,7 @@ class DataDashboardScreen(QWidget):
         self.kb_source_name_input.clear()
         self.kb_source_url_input.clear()
         self.refresh_sources_table()
+        self._mark_knowledge_dirty("Website source changed")
         self._set_kb_status(f"Added website source: {name or url}")
 
     def remove_selected_source(self) -> None:
@@ -641,6 +661,8 @@ class DataDashboardScreen(QWidget):
             return
         removed = remove_web_source(url, config_path=self.web_sources_config_path)
         self.refresh_sources_table()
+        if removed:
+            self._mark_knowledge_dirty("Website source changed")
         self._set_kb_status("Removed selected source." if removed else "Source was not found.")
 
     def toggle_selected_source(self) -> None:
@@ -658,6 +680,8 @@ class DataDashboardScreen(QWidget):
             config_path=self.web_sources_config_path,
         )
         self.refresh_sources_table()
+        if changed:
+            self._mark_knowledge_dirty("Website source changed")
         state = "enabled" if next_enabled else "disabled"
         self._set_kb_status(f"Source {state}." if changed else "Source was not found.")
 
@@ -678,6 +702,7 @@ class DataDashboardScreen(QWidget):
         except Exception as error:
             self._set_kb_status(f"Could not upload document: {error}")
             return
+        self._mark_knowledge_dirty("Document source changed")
         self._set_sources_status(f"Uploaded document: {source_path.name}")
 
     def open_documents_folder(self) -> None:
@@ -877,6 +902,20 @@ class DataDashboardScreen(QWidget):
     def _set_eval_status(self, message: str) -> None:
         """Update the chatbot evaluation status label."""
         self.chatbot_eval_status_label.setText(message)
+
+    def _mark_knowledge_dirty(self, reason: str) -> None:
+        """Best-effort freshness marker after managed data/source changes."""
+        try:
+            mark_knowledge_dirty(self.db_path, reason)
+        except Exception:
+            return
+
+    def _clear_knowledge_dirty(self) -> None:
+        """Best-effort freshness reset after a successful sync."""
+        try:
+            clear_knowledge_dirty(self.db_path)
+        except Exception:
+            return
 
     def _apply_styles(self) -> None:
         """Apply the modern public dashboard style."""

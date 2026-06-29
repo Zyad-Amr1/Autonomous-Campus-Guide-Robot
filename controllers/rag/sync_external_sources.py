@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from controllers.rag.document_ingestor import ingest_folder
 from controllers.rag.knowledge_store import (
     clear_external_chunks,
     init_knowledge_store,
+    set_sync_status,
     upsert_knowledge_chunks,
 )
 from controllers.rag.web_ingestor import ingest_web_sources_config
@@ -40,6 +42,7 @@ def sync_external_sources_to_knowledge_base(
             errors.append(f"documents: {error}")
 
     upsert_knowledge_chunks(db_path, website_chunks + document_chunks)
+    set_sync_status(db_path, "last_external_sync", datetime.now(timezone.utc).isoformat(timespec="seconds"))
     return {
         "website_chunks": len(website_chunks),
         "document_chunks": len(document_chunks),

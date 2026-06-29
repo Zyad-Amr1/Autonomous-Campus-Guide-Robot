@@ -13,6 +13,7 @@ from controllers.rag.conversation_memory import ConversationMemory
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
 from controllers.rag.knowledge_store import (
     init_knowledge_store,
+    is_knowledge_dirty,
     load_knowledge_chunks,
 )
 from controllers.rag.prompt_builder import (
@@ -143,6 +144,7 @@ class PublicChatController:
         cleaned_question = question.strip()
         language = detect_language(cleaned_question)
         intent = detect_intent(cleaned_question)
+        self._last_knowledge_dirty = self._safe_is_knowledge_dirty()
         if not cleaned_question:
             return {
                 "answer": ENGLISH_NO_CONTEXT,
@@ -343,7 +345,15 @@ class PublicChatController:
             "top_score": round(max(scores), 4) if scores else 0,
             "used_groq": used_groq,
             "context_chars": context_character_count(chunks),
+            "knowledge_dirty": bool(getattr(self, "_last_knowledge_dirty", False)),
         }
+
+    def _safe_is_knowledge_dirty(self) -> bool:
+        """Check freshness metadata without letting metadata errors block chat."""
+        try:
+            return is_knowledge_dirty(self.db_path)
+        except Exception:
+            return False
 
     def _answer_ignores_context(self, answer: str, chunks: list[dict[str, Any]]) -> bool:
         """Detect provider answers that appear unrelated to retrieved evidence."""

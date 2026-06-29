@@ -13,7 +13,7 @@ from controllers.public_chat_controller import (
 )
 from controllers.rag.conversation_memory import ConversationMemory
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
-from controllers.rag.knowledge_store import init_knowledge_store, upsert_knowledge_chunks
+from controllers.rag.knowledge_store import init_knowledge_store, mark_knowledge_dirty, upsert_knowledge_chunks
 from controllers.rag.prompt_builder import build_rag_prompt, detect_language
 from controllers.rag.retriever import retrieve_relevant_chunks
 from database.init_db import initialize_database
@@ -257,6 +257,31 @@ def test_no_context_does_not_call_fake_llm(tmp_path) -> None:
     assert result["route"] == "no_context"
     assert calls == []
     assert result["debug"]["used_groq"] is False
+
+
+def test_answer_question_includes_knowledge_dirty_debug_flag(tmp_path) -> None:
+    db_path = _db(tmp_path)
+    mark_knowledge_dirty(db_path, "FAQ data changed")
+    controller = PublicChatController(db_path=db_path, llm_provider=None)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert result["route"] == "rag_fallback"
+    assert result["debug"]["knowledge_dirty"] is True
+    assert "Cafeteria" in result["answer"]
+
+
+def test_no_context_still_works_when_knowledge_is_dirty(tmp_path) -> None:
+    db_path = _db(tmp_path)
+    mark_knowledge_dirty(db_path, "Courses data changed")
+    controller = PublicChatController(db_path=db_path, llm_provider=None)
+
+    result = controller.answer_question("Tell me about parking permits on Mars")
+
+    assert result["route"] == "no_context"
+    assert result["sources"] == []
+    assert result["answer"] == ENGLISH_NO_CONTEXT
+    assert result["debug"]["knowledge_dirty"] is True
 
 
 def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> None:

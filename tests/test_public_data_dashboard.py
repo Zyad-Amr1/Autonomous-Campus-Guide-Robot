@@ -1,6 +1,7 @@
 """Headless tests for the unified public Data Management screen."""
 
 import os
+import sqlite3
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -9,11 +10,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
 )
 
 from database.init_db import initialize_database
+from controllers.rag.knowledge_store import is_knowledge_dirty, mark_knowledge_dirty
 from ui.public.main_window import PublicMainWindow
 from ui.public.screens.data_dashboard_screen import DataDashboardScreen
 
@@ -31,6 +34,21 @@ def _create_temp_db(tmp_path):
     db_path = tmp_path / "test_ecu_robot.db"
     initialize_database(db_path)
     return db_path
+
+
+def _insert_faq(db_path) -> None:
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO faq (question, answer, keywords, category)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("Where is admissions?", "Admissions is in Building A.", "admissions", "services"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def test_data_dashboard_screen_can_be_created(tmp_path) -> None:
@@ -194,18 +212,21 @@ def test_knowledge_status_label_updates(tmp_path, monkeypatch) -> None:
     application = _get_application()
 
     monkeypatch.setattr(
-        "ui.public.screens.data_dashboard_screen.load_knowledge_chunks",
-        lambda db_path: [
-            {"source": "faq", "title": "Admissions"},
-            {"source": "faq", "title": "Fees"},
-            {"source": "website", "title": "Engineering"},
-        ],
+        "ui.public.screens.data_dashboard_screen.get_knowledge_status_summary",
+        lambda db_path: {
+            "dirty": False,
+            "dirty_reason": "",
+            "last_database_sync": "",
+            "last_external_sync": "",
+            "chunk_count": 3,
+            "sources": {"faq": 2, "website": 1},
+        },
     )
     screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
     try:
         assert application is not None
         screen.kb_status_button.click()
-        assert "3 total" in screen.kb_status_label.text()
+        assert "3 chunks" in screen.kb_status_label.text()
         assert "faq: 2" in screen.kb_status_label.text()
         assert "website: 1" in screen.kb_status_label.text()
     finally:
@@ -308,6 +329,155 @@ def test_upload_document_copies_file(tmp_path, monkeypatch) -> None:
         screen.kb_upload_document_button.click()
         assert (screen.documents_folder / "source.txt").exists()
         assert "Uploaded document" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_csv_upload_marks_knowledge_dirty(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    csv_file = tmp_path / "faq.csv"
+    csv_file.write_text("question,answer\nQ,A\n", encoding="utf-8")
+    db_path = _create_temp_db(tmp_path)
+
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.QFileDialog.getOpenFileName",
+        lambda *args, **kwargs: (str(csv_file), ""),
+    )
+
+    def fake_importer(path, database_path):
+        assert path == str(csv_file)
+        assert database_path == db_path
+        return {"imported": 1, "skipped": 0}
+
+    monkeypatch.setitem(
+        __import__("ui.public.screens.data_dashboard_screen", fromlist=["DATASETS"]).DATASETS["FAQ"],
+        "importer",
+        fake_importer,
+    )
+    screen = DataDashboardScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.data_dataset_selector.setCurrentText("FAQ")
+        screen.data_upload_csv_button.click()
+        assert is_knowledge_dirty(db_path) is True
+    finally:
+        screen.close()
+
+
+def test_save_edits_marks_knowledge_dirty(tmp_path) -> None:
+    application = _get_application()
+    db_path = _create_temp_db(tmp_path)
+    _insert_faq(db_path)
+    screen = DataDashboardScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.data_dataset_selector.setCurrentText("FAQ")
+        screen.load_selected_dataset()
+        screen.data_table.item(0, 2).setText("Admissions is near the main gate.")
+        screen.data_save_edits_button.click()
+        assert is_knowledge_dirty(db_path) is True
+    finally:
+        screen.close()
+
+
+def test_delete_row_marks_knowledge_dirty(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    db_path = _create_temp_db(tmp_path)
+    _insert_faq(db_path)
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    screen = DataDashboardScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.data_dataset_selector.setCurrentText("FAQ")
+        screen.load_selected_dataset()
+        screen.data_table.selectRow(0)
+        screen.data_delete_row_button.click()
+        assert is_knowledge_dirty(db_path) is True
+    finally:
+        screen.close()
+
+
+def test_source_changes_mark_knowledge_dirty(tmp_path) -> None:
+    application = _get_application()
+    db_path = _create_temp_db(tmp_path)
+    screen = DataDashboardScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.kb_source_name_input.setText("ECU")
+        screen.kb_source_url_input.setText("https://example.edu")
+        screen.kb_add_source_button.click()
+        assert is_knowledge_dirty(db_path) is True
+    finally:
+        screen.close()
+
+
+def test_upload_document_marks_knowledge_dirty(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    db_path = _create_temp_db(tmp_path)
+    source_file = tmp_path / "source.txt"
+    source_file.write_text("Document text", encoding="utf-8")
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.QFileDialog.getOpenFileName",
+        lambda *args, **kwargs: (str(source_file), ""),
+    )
+    screen = DataDashboardScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.kb_upload_document_button.click()
+        assert is_knowledge_dirty(db_path) is True
+    finally:
+        screen.close()
+
+
+def test_rebuild_all_clears_dirty_after_success(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    db_path = _create_temp_db(tmp_path)
+    mark_knowledge_dirty(db_path, "Courses data changed")
+
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.sync_database_to_knowledge_base",
+        lambda path: {"chunks_created": 3},
+    )
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.sync_external_sources_to_knowledge_base",
+        lambda path, sources_root: {"website_chunks": 1, "document_chunks": 2, "errors": []},
+    )
+    screen = DataDashboardScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.kb_rebuild_all_button.click()
+        assert is_knowledge_dirty(db_path) is False
+        assert "Rebuilt knowledge base" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_knowledge_status_shows_dirty_and_sync_metadata(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.get_knowledge_status_summary",
+        lambda db_path: {
+            "dirty": True,
+            "dirty_reason": "Courses data changed",
+            "last_database_sync": "2026-06-29T10:00:00+00:00",
+            "last_external_sync": "",
+            "chunk_count": 12,
+            "sources": {"courses": 4, "website": 8},
+        },
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_status_button.click()
+        text = screen.kb_status_label.text()
+        assert "Knowledge Base: 12 chunks" in text
+        assert "Status: Outdated" in text
+        assert "Reason: Courses data changed" in text
+        assert "courses: 4" in text
+        assert "Last database sync: 2026-06-29" in text
     finally:
         screen.close()
 

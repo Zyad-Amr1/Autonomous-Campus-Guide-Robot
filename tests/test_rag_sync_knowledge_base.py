@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from controllers.rag.knowledge_store import load_knowledge_chunks, search_knowledge_chunks
+from controllers.rag.knowledge_store import get_sync_status, load_knowledge_chunks, search_knowledge_chunks
+from controllers.rag.sync_external_sources import sync_external_sources_to_knowledge_base
 from controllers.rag.sync_knowledge_base import sync_database_to_knowledge_base
 from database.init_db import initialize_database
 
@@ -70,3 +71,18 @@ def test_synced_chunks_are_searchable(tmp_path) -> None:
     assert results[0]["source"] == "rooms"
     assert "Cafeteria" in results[0]["title"]
 
+
+def test_database_sync_updates_last_database_sync(tmp_path) -> None:
+    db_path = _db(tmp_path)
+
+    sync_database_to_knowledge_base(db_path)
+
+    assert get_sync_status(db_path, "last_database_sync")
+
+
+def test_external_sync_updates_last_external_sync(tmp_path) -> None:
+    db_path = _db(tmp_path)
+
+    sync_external_sources_to_knowledge_base(db_path, tmp_path / "knowledge_sources")
+
+    assert get_sync_status(db_path, "last_external_sync")

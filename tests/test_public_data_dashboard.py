@@ -60,6 +60,9 @@ def test_required_widgets_exist(tmp_path) -> None:
             ("kb_rebuild_all_button", QPushButton),
             ("kb_status_button", QPushButton),
             ("kb_status_label", QLabel),
+            ("chatbot_eval_button", QPushButton),
+            ("chatbot_debug_status_button", QPushButton),
+            ("chatbot_eval_status_label", QLabel),
         ):
             assert screen.findChild(widget_type, object_name) is not None
     finally:
@@ -215,6 +218,80 @@ def test_knowledge_sync_failure_does_not_crash(tmp_path, monkeypatch) -> None:
         assert application is not None
         screen.kb_sync_database_button.click()
         assert "Could not sync database knowledge" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_chatbot_evaluation_buttons_exist(tmp_path) -> None:
+    application = _get_application()
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        assert screen.chatbot_eval_button.text() == "Run Chatbot Evaluation"
+        assert screen.chatbot_debug_status_button.text() == "Show RAG Debug Status"
+    finally:
+        screen.close()
+
+
+def test_chatbot_evaluation_status_label_updates(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+
+    def fake_evaluator(_controller):
+        return {"total": 3, "passed": 2, "failed": 1, "results": []}
+
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.run_chatbot_evaluation",
+        fake_evaluator,
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.chatbot_eval_button.click()
+        assert screen.chatbot_eval_status_label.text() == "Evaluation: 2/3 passed"
+    finally:
+        screen.close()
+
+
+def test_chatbot_evaluator_failure_does_not_crash(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+
+    def failing_evaluator(_controller):
+        raise RuntimeError("evaluation failed")
+
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.run_chatbot_evaluation",
+        failing_evaluator,
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.chatbot_eval_button.click()
+        assert "Could not run chatbot evaluation" in screen.chatbot_eval_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_rag_debug_status_button_updates_label(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.load_knowledge_chunks",
+        lambda db_path: [
+            {"source": "faq", "title": "One"},
+            {"source": "website", "title": "Two"},
+        ],
+    )
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.load_groq_config",
+        lambda: {"api_key": "test", "model": "test"},
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.chatbot_debug_status_button.click()
+        text = screen.chatbot_eval_status_label.text()
+        assert "2 chunk" in text
+        assert "Groq key detected: yes" in text
+        assert "faq" in text
     finally:
         screen.close()
 

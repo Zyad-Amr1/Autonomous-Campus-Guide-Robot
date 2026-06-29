@@ -19,6 +19,7 @@ from controllers.rag.prompt_builder import (
     ARABIC_INSUFFICIENT,
     ENGLISH_INSUFFICIENT,
     build_rag_prompt,
+    context_character_count,
     detect_language,
 )
 from controllers.rag.query_analyzer import detect_intent, extract_keywords
@@ -150,6 +151,7 @@ class PublicChatController:
                 "route": "no_context",
                 "intent": "unknown",
                 "language": "en",
+                "debug": self._debug_metadata([], used_groq=False),
             }
 
         recent_messages = self.conversation_memory.get_recent_messages()
@@ -173,9 +175,11 @@ class PublicChatController:
                 "route": "no_context",
                 "intent": retrieval_intent,
                 "language": language,
+                "debug": self._debug_metadata(retrieved_chunks, used_groq=False),
             }
 
         route = "rag_fallback"
+        used_groq = False
         if self.llm_provider is not None:
             messages = build_rag_prompt(
                 cleaned_question,
@@ -193,6 +197,11 @@ class PublicChatController:
                 )
                 if answer:
                     route = "rag_groq"
+                    used_groq = True
+                    if self._answer_ignores_context(answer, retrieved_chunks):
+                        answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
+                        route = "rag_fallback"
+                        used_groq = False
                 else:
                     answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
                     route = "rag_fallback"
@@ -214,6 +223,7 @@ class PublicChatController:
             "route": route,
             "intent": retrieval_intent,
             "language": language,
+            "debug": self._debug_metadata(retrieved_chunks, used_groq=used_groq),
         }
 
     def build_prompt(
@@ -324,6 +334,30 @@ class PublicChatController:
             }
             for chunk in chunks
         ]
+
+    def _debug_metadata(self, chunks: list[dict[str, Any]], used_groq: bool) -> dict[str, Any]:
+        """Return development-only retrieval and generation diagnostics."""
+        scores = [float(chunk.get("final_score", chunk.get("score", 0)) or 0) for chunk in chunks]
+        return {
+            "retrieved_count": len(chunks),
+            "top_score": round(max(scores), 4) if scores else 0,
+            "used_groq": used_groq,
+            "context_chars": context_character_count(chunks),
+        }
+
+    def _answer_ignores_context(self, answer: str, chunks: list[dict[str, Any]]) -> bool:
+        """Detect provider answers that appear unrelated to retrieved evidence."""
+        answer_keywords = set(extract_keywords(answer))
+        if len(answer_keywords) < 6:
+            return False
+        context_text = " ".join(
+            f"{chunk.get('title', '')} {chunk.get('content', '')} {' '.join(str(keyword) for keyword in chunk.get('keywords', []))}"
+            for chunk in chunks
+        )
+        context_keywords = set(extract_keywords(context_text))
+        if not context_keywords:
+            return True
+        return answer_keywords.isdisjoint(context_keywords)
 
     def _expanded_retrieval_query(
         self,

@@ -34,6 +34,8 @@ from controllers.professor_csv_controller import (
     export_professors_to_csv,
     import_professors_from_csv,
 )
+from controllers.public_chat_controller import PublicChatController, load_groq_config
+from controllers.rag.evaluator import run_chatbot_evaluation
 from controllers.rag.knowledge_store import load_knowledge_chunks
 from controllers.rag.sync_external_sources import sync_external_sources_to_knowledge_base
 from controllers.rag.sync_knowledge_base import sync_database_to_knowledge_base
@@ -193,6 +195,7 @@ class DataDashboardScreen(QWidget):
         """Create the protected data dashboard."""
         super().__init__()
         self.db_path = db_path
+        self._last_sync_status = "No sync run in this session."
         self.setObjectName("data_dashboard_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
@@ -296,6 +299,38 @@ class DataDashboardScreen(QWidget):
         self.kb_status_button.clicked.connect(self.show_knowledge_status)
         knowledge_layout.addLayout(knowledge_button_row)
         page_layout.addWidget(knowledge_panel)
+
+        evaluation_panel = QFrame()
+        evaluation_panel.setObjectName("chatbot_evaluation_panel")
+        evaluation_layout = QVBoxLayout(evaluation_panel)
+        evaluation_layout.setContentsMargins(16, 14, 16, 14)
+        evaluation_layout.setSpacing(10)
+
+        evaluation_header_row = QHBoxLayout()
+        evaluation_header_row.setSpacing(10)
+        self.chatbot_eval_title = QLabel("Chatbot Evaluation")
+        self.chatbot_eval_title.setObjectName("chatbot_eval_title")
+        self.chatbot_eval_status_label = QLabel("Ready to evaluate chatbot grounding.")
+        self.chatbot_eval_status_label.setObjectName("chatbot_eval_status_label")
+        self.chatbot_eval_status_label.setWordWrap(True)
+        evaluation_header_row.addWidget(self.chatbot_eval_title)
+        evaluation_header_row.addWidget(self.chatbot_eval_status_label, stretch=1)
+        evaluation_layout.addLayout(evaluation_header_row)
+
+        evaluation_button_row = QHBoxLayout()
+        evaluation_button_row.setSpacing(10)
+        self.chatbot_eval_button = QPushButton("Run Chatbot Evaluation")
+        self.chatbot_eval_button.setObjectName("chatbot_eval_button")
+        self.chatbot_debug_status_button = QPushButton("Show RAG Debug Status")
+        self.chatbot_debug_status_button.setObjectName("chatbot_debug_status_button")
+        for button in (self.chatbot_eval_button, self.chatbot_debug_status_button):
+            button.setMinimumHeight(BUTTON_HEIGHT)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            evaluation_button_row.addWidget(button)
+        self.chatbot_eval_button.clicked.connect(self.run_chatbot_evaluation)
+        self.chatbot_debug_status_button.clicked.connect(self.show_rag_debug_status)
+        evaluation_layout.addLayout(evaluation_button_row)
+        page_layout.addWidget(evaluation_panel)
 
         self.data_table = QTableWidget()
         self.data_table.setObjectName("data_table")
@@ -419,6 +454,7 @@ class DataDashboardScreen(QWidget):
             self._set_kb_status(f"Could not sync database knowledge: {error}")
             return
         chunks_created = int(result.get("chunks_created", 0))
+        self._last_sync_status = f"Database sync: {chunks_created} chunk(s)."
         self._set_kb_status(f"Synced {chunks_created} database knowledge chunk(s).")
 
     def sync_external_knowledge(self) -> None:
@@ -437,6 +473,7 @@ class DataDashboardScreen(QWidget):
         )
         if errors:
             message += f" Some sources need attention: {len(errors)} issue(s)."
+        self._last_sync_status = message
         self._set_kb_status(message)
 
     def rebuild_all_knowledge(self) -> None:
@@ -453,6 +490,10 @@ class DataDashboardScreen(QWidget):
         self._set_kb_status(
             "Rebuilt knowledge base: "
             f"{database_chunks} database, {website_chunks} website, "
+            f"{document_chunks} document chunk(s)."
+        )
+        self._last_sync_status = (
+            f"Rebuild: {database_chunks} database, {website_chunks} website, "
             f"{document_chunks} document chunk(s)."
         )
 
@@ -474,6 +515,34 @@ class DataDashboardScreen(QWidget):
             f"{source}: {count}" for source, count in sorted(counts.items())
         )
         self._set_kb_status(f"Knowledge chunks: {len(chunks)} total ({grouped}).")
+
+    def run_chatbot_evaluation(self) -> None:
+        """Run prepared chatbot evaluation questions and show the pass count."""
+        try:
+            summary = run_chatbot_evaluation(PublicChatController(db_path=self.db_path))
+        except Exception as error:
+            self._set_eval_status(f"Could not run chatbot evaluation: {error}")
+            return
+        passed = int(summary.get("passed", 0))
+        total = int(summary.get("total", 0))
+        self._set_eval_status(f"Evaluation: {passed}/{total} passed")
+
+    def show_rag_debug_status(self) -> None:
+        """Show knowledge and Groq debug status without exposing secrets."""
+        try:
+            chunks = load_knowledge_chunks(self.db_path)
+            counts: dict[str, int] = {}
+            for chunk in chunks:
+                source = str(chunk.get("source") or "unknown")
+                counts[source] = counts.get(source, 0) + 1
+            sources = ", ".join(sorted(counts)) if counts else "none"
+            groq_detected = "yes" if bool(load_groq_config().get("api_key")) else "no"
+            self._set_eval_status(
+                f"RAG Debug: {len(chunks)} chunk(s); sources: {sources}; "
+                f"Groq key detected: {groq_detected}; last sync: {self._last_sync_status}"
+            )
+        except Exception as error:
+            self._set_eval_status(f"Could not read RAG debug status: {error}")
 
     def _populate_table(self, dataset_name: str, rows: list[dict]) -> None:
         """Fill the table with clean row numbers and hidden record ids."""
@@ -605,6 +674,10 @@ class DataDashboardScreen(QWidget):
         """Update the knowledge base status label."""
         self.kb_status_label.setText(message)
 
+    def _set_eval_status(self, message: str) -> None:
+        """Update the chatbot evaluation status label."""
+        self.chatbot_eval_status_label.setText(message)
+
     def _apply_styles(self) -> None:
         """Apply the modern public dashboard style."""
         self.setStyleSheet(
@@ -622,18 +695,21 @@ class DataDashboardScreen(QWidget):
 
             QLabel#data_dashboard_subtitle,
             QLabel#data_status_label,
-            QLabel#kb_status_label {{
+            QLabel#kb_status_label,
+            QLabel#chatbot_eval_status_label {{
                 color: {TEXT_MUTED};
                 {font(15, 650)}
             }}
 
-            QLabel#kb_section_title {{
+            QLabel#kb_section_title,
+            QLabel#chatbot_eval_title {{
                 color: {CHARCOAL};
                 {font(18, 850)}
             }}
 
             QFrame#data_toolbar,
-            QFrame#knowledge_base_panel {{
+            QFrame#knowledge_base_panel,
+            QFrame#chatbot_evaluation_panel {{
                 background-color: {WHITE};
                 border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS)};

@@ -239,6 +239,24 @@ def test_answer_question_returns_no_context_when_nothing_found(tmp_path, monkeyp
     assert result["answer"] == ENGLISH_NO_CONTEXT
     assert result["intent"] == "unknown"
     assert result["language"] == "en"
+    assert result["debug"]["retrieved_count"] == 0
+    assert result["debug"]["used_groq"] is False
+
+
+def test_no_context_does_not_call_fake_llm(tmp_path) -> None:
+    calls = []
+
+    def fake_provider(messages: list[dict[str, str]]) -> str:
+        calls.append(messages)
+        return "Should not be used."
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=fake_provider)
+
+    result = controller.answer_question("Tell me about parking permits on Mars")
+
+    assert result["route"] == "no_context"
+    assert calls == []
+    assert result["debug"]["used_groq"] is False
 
 
 def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> None:
@@ -281,6 +299,9 @@ def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) 
     assert "Student Center entrance" in result["answer"]
     assert result["intent"] == "room_location"
     assert result["language"] == "en"
+    assert result["debug"]["retrieved_count"] >= 1
+    assert result["debug"]["top_score"] > 0
+    assert result["debug"]["context_chars"] > 0
 
 
 def test_answer_question_uses_retriever_pipeline(tmp_path, monkeypatch) -> None:
@@ -383,6 +404,33 @@ def test_answer_question_uses_fake_llm_provider_when_provided(tmp_path) -> None:
     assert result["answer"] == "LLM answer from fake provider."
     assert result["intent"] == "room_location"
     assert result["language"] == "en"
+    assert result["debug"]["used_groq"] is True
+
+
+def test_empty_provider_answer_falls_back_safely(tmp_path) -> None:
+    def empty_provider(_messages: list[dict[str, str]]) -> str:
+        return ""
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=empty_provider)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert result["route"] == "rag_fallback"
+    assert "Cafeteria" in result["answer"]
+    assert result["debug"]["used_groq"] is False
+
+
+def test_provider_answer_that_ignores_context_falls_back(tmp_path) -> None:
+    def unrelated_provider(_messages: list[dict[str, str]]) -> str:
+        return "Paris airports and ancient mountain weather forecasts are unrelated."
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=unrelated_provider)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert result["route"] == "rag_fallback"
+    assert "Cafeteria" in result["answer"]
+    assert result["debug"]["used_groq"] is False
 
 
 def test_follow_up_question_uses_conversation_memory(tmp_path) -> None:
@@ -454,6 +502,34 @@ def test_ambiguous_follow_up_without_context_asks_clarification(tmp_path, monkey
     assert result["route"] == "no_context"
     assert result["confidence"] == "low"
     assert "clarify" in result["answer"].casefold()
+
+
+def test_weak_context_gives_low_or_medium_confidence(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+
+    def weak_retrieve(_question, _chunks, limit=8, intent=None):
+        return [
+            {
+                "id": "faq:weak",
+                "source": "faq",
+                "title": "Weak",
+                "content": "Small context.",
+                "keywords": ["weak"],
+                "final_score": 10,
+                "score": 10,
+            }
+        ]
+
+    monkeypatch.setattr(
+        "controllers.public_chat_controller.retrieve_relevant_chunks",
+        weak_retrieve,
+    )
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("Tell me about weak context")
+
+    assert result["confidence"] in {"low", "medium"}
+    assert result["debug"]["top_score"] == 10
 
 
 def test_answer_question_falls_back_safely_when_provider_fails(tmp_path) -> None:

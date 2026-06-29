@@ -105,3 +105,9 @@ def _format_context(
         if used_characters >= max_characters:
             break
     return "\n\n".join(sections) if sections else "No context was retrieved."
+
+
+def context_character_count(chunks: list[dict[str, Any]]) -> int:
+    """Return the character count of context that would be sent to the LLM."""
+    context = _format_context(chunks)
+    return 0 if context == "No context was retrieved." else len(context)

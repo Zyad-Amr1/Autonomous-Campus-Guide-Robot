@@ -1,0 +1,22 @@
+{
+  "questions": [
+    {
+      "id": "q1",
+      "question": "Tell me about ECU faculties",
+      "language": "en",
+      "expected_sources": ["faculties", "website", "document"]
+    },
+    {
+      "id": "q2",
+      "question": "Where is the cafeteria?",
+      "language": "en",
+      "expected_sources": ["rooms"]
+    },
+    {
+      "id": "q3",
+      "question": "ما هي كليات الجامعة؟",
+      "language": "ar",
+      "expected_sources": ["faculties", "website", "document"]
+    }
+  ]
+}

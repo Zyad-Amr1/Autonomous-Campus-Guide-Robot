@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QCompleter,
     QComboBox,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -144,7 +143,7 @@ class MapCanvas(QWidget):
     def __init__(self, background_image_path: str | None = None) -> None:
         super().__init__()
         self.setObjectName("map_canvas")
-        self.setMinimumSize(720, 500)
+        self.setMinimumSize(760, 560)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.background_image_path: str | None = None
@@ -161,7 +160,11 @@ class MapCanvas(QWidget):
         self.selected_landmark: str | None = None
         self.landmark_clicked = None
         self._image_target_rect = QRectF()
-        self._marker_hit_radius = 20
+        self._marker_hit_radius = 18
+        self._zoom_factor = 1.0
+        self._pan_offset = QPointF(0, 0)
+        self._is_panning = False
+        self._last_pan_position = QPointF()
         if background_image_path is not None:
             self.set_background_image(background_image_path)
 
@@ -215,10 +218,12 @@ class MapCanvas(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        canvas_rect = QRectF(self.rect().adjusted(8, 8, -8, -8))
-        painter.setPen(QPen(QColor(BORDER), 1))
-        painter.setBrush(QColor(WHITE))
-        painter.drawRoundedRect(canvas_rect, 16, 16)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        canvas_rect = QRectF(self.rect().adjusted(3, 3, -3, -3))
+        painter.setPen(QPen(QColor("#D9DEE7"), 1))
+        painter.setBrush(QColor("#FDFDFB"))
+        painter.drawRoundedRect(canvas_rect, 14, 14)
 
         if self._background_pixmap.isNull():
             self._image_target_rect = canvas_rect
@@ -232,31 +237,85 @@ class MapCanvas(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """Select a landmark when a user taps near its clean hotspot."""
-        for name in reversed(list(self.landmarks)):
-            center = self._point_for_name(name)
-            delta = center - event.position()
-            if (
-                delta.x() * delta.x() + delta.y() * delta.y()
-                <= self._marker_hit_radius * self._marker_hit_radius
-            ):
-                self.select_landmark(name)
-                if self.landmark_clicked is not None:
-                    self.landmark_clicked(name)
-                return
+        if event.button() == Qt.MouseButton.LeftButton:
+            for name in reversed(list(self.landmarks)):
+                center = self._point_for_name(name)
+                delta = center - event.position()
+                if (
+                    delta.x() * delta.x() + delta.y() * delta.y()
+                    <= self._marker_hit_radius * self._marker_hit_radius
+                ):
+                    self.select_landmark(name)
+                    if self.landmark_clicked is not None:
+                        self.landmark_clicked(name)
+                    return
+            self._is_panning = True
+            self._last_pan_position = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        """Pan the zoomed map with a simple drag gesture."""
+        if self._is_panning and self._zoom_factor > 1.0:
+            delta = event.position() - self._last_pan_position
+            self._last_pan_position = event.position()
+            self._pan_offset += delta
+            self._constrain_pan()
+            self.update()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        """End drag panning."""
+        if event.button() == Qt.MouseButton.LeftButton and self._is_panning:
+            self._is_panning = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+        super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        """Support mouse wheel zoom for kiosk operators and desktop users."""
+        if event.angleDelta().y() > 0:
+            self.zoom_in()
+        elif event.angleDelta().y() < 0:
+            self.zoom_out()
+        event.accept()
+
+    def zoom_in(self) -> None:
+        """Increase map zoom without distorting the real image."""
+        self._zoom_factor = min(2.2, self._zoom_factor + 0.15)
+        self._constrain_pan()
+        self.update()
+
+    def zoom_out(self) -> None:
+        """Decrease map zoom and keep the image centered at fit size."""
+        self._zoom_factor = max(1.0, self._zoom_factor - 0.15)
+        if self._zoom_factor == 1.0:
+            self._pan_offset = QPointF(0, 0)
+        self._constrain_pan()
+        self.update()
+
+    def reset_view(self) -> None:
+        """Return the map to its fitted viewport."""
+        self._zoom_factor = 1.0
+        self._pan_offset = QPointF(0, 0)
+        self.update()
 
     def _draw_background_image(self, painter: QPainter, rect: QRectF) -> None:
         """Draw the real campus map image smoothly, centered, and aspect-safe."""
+        viewport_size = rect.size().toSize()
+        zoomed_size = viewport_size * self._zoom_factor
         scaled = self._background_pixmap.scaled(
-            rect.size().toSize(),
+            zoomed_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        target_x = rect.x() + (rect.width() - scaled.width()) / 2
-        target_y = rect.y() + (rect.height() - scaled.height()) / 2
+        target_x = rect.x() + (rect.width() - scaled.width()) / 2 + self._pan_offset.x()
+        target_y = rect.y() + (rect.height() - scaled.height()) / 2 + self._pan_offset.y()
         self._image_target_rect = QRectF(target_x, target_y, scaled.width(), scaled.height())
         clip_path = QPainterPath()
-        clip_path.addRoundedRect(rect, 18, 18)
+        clip_path.addRoundedRect(rect, 14, 14)
         painter.save()
         painter.setClipPath(clip_path)
         painter.drawPixmap(int(target_x), int(target_y), scaled)
@@ -276,15 +335,17 @@ class MapCanvas(QWidget):
         )
 
     def _draw_route(self, painter: QPainter) -> None:
-        """Draw the current route as a Google Maps-like gold polyline."""
+        """Draw the current route as a polished ECU accent polyline."""
         if len(self.current_route) < 2:
             return
         path = QPainterPath(self._point_for_name(self.current_route[0]))
         for node in self.current_route[1:]:
             path.lineTo(self._point_for_name(node))
-        painter.setPen(QPen(QColor(WHITE), 10, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(QColor(255, 255, 255, 210), 11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
-        painter.setPen(QPen(QColor(GOLD), 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(QColor(ECU_RED), 7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QPen(QColor(GOLD), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
 
     def _draw_landmark_hotspots(self, painter: QPainter) -> None:
@@ -295,27 +356,37 @@ class MapCanvas(QWidget):
             is_destination = name == self.route_destination
             is_selected = name == self.selected_landmark
             fill = QColor(WHITE)
-            border = QColor(NAVY)
-            radius = 7
+            border = QColor(CHARCOAL)
+            radius = 5
             if is_start:
                 fill = QColor("#22A06B")
                 border = QColor(WHITE)
-                radius = 10
+                radius = 8
             elif is_destination:
-                fill = QColor(GOLD)
-                border = QColor(NAVY_DARK)
-                radius = 11
+                fill = QColor(ECU_RED)
+                border = QColor(WHITE)
+                radius = 9
             elif is_selected:
                 fill = QColor(GOLD_LIGHT)
-                border = QColor(NAVY_DARK)
-                radius = 10
+                border = QColor(ECU_RED)
+                radius = 8
 
-            painter.setPen(QPen(QColor(0, 0, 0, 45), 4))
-            painter.setBrush(QColor(0, 0, 0, 30))
-            painter.drawEllipse(center, radius + 2, radius + 2)
+            pin_path = QPainterPath()
+            pin_path.addEllipse(center, radius, radius)
+            pin_tip = QPointF(center.x(), center.y() + radius + 7)
+            pin_path.moveTo(center.x() - radius * 0.45, center.y() + radius * 0.55)
+            pin_path.lineTo(pin_tip)
+            pin_path.lineTo(center.x() + radius * 0.45, center.y() + radius * 0.55)
+            pin_path.closeSubpath()
+            painter.setPen(QPen(QColor(0, 0, 0, 35), 3))
+            painter.setBrush(QColor(0, 0, 0, 28))
+            painter.drawPath(pin_path.translated(0, 2))
             painter.setPen(QPen(border, 2))
             painter.setBrush(fill)
-            painter.drawEllipse(center, radius, radius)
+            painter.drawPath(pin_path)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(CHARCOAL) if fill != QColor(ECU_RED) else QColor(WHITE))
+            painter.drawEllipse(center, max(2, radius - 5), max(2, radius - 5))
 
     def _draw_walker(self, painter: QPainter) -> None:
         """Draw the animated current-location marker on top of the route."""
@@ -370,6 +441,24 @@ class MapCanvas(QWidget):
             traveled += segment_length
         return route_points[-1]
 
+    def _constrain_pan(self) -> None:
+        """Keep zoomed image edges near the viewport."""
+        if self._background_pixmap.isNull() or self._zoom_factor <= 1.0:
+            self._pan_offset = QPointF(0, 0)
+            return
+        rect = QRectF(self.rect().adjusted(3, 3, -3, -3))
+        scaled = self._background_pixmap.scaled(
+            rect.size().toSize() * self._zoom_factor,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        max_x = max(0.0, (scaled.width() - rect.width()) / 2)
+        max_y = max(0.0, (scaled.height() - rect.height()) / 2)
+        self._pan_offset = QPointF(
+            min(max(self._pan_offset.x(), -max_x), max_x),
+            min(max(self._pan_offset.y(), -max_y), max_y),
+        )
+
 
 class MapScreen(QWidget):
     """Display campus walking navigation over the real ECU map."""
@@ -398,8 +487,8 @@ class MapScreen(QWidget):
     def _build_ui(self) -> None:
         """Arrange route controls, map canvas, and info panel."""
         page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(PAGE_PADDING, 24, PAGE_PADDING, PAGE_PADDING)
-        page_layout.setSpacing(14)
+        page_layout.setContentsMargins(PAGE_PADDING, 20, PAGE_PADDING, PAGE_PADDING)
+        page_layout.setSpacing(12)
 
         self.map_title = QLabel("Campus Map")
         self.map_title.setObjectName("map_title")
@@ -414,20 +503,19 @@ class MapScreen(QWidget):
 
         controls = QFrame()
         controls.setObjectName("map_controls_panel")
-        controls_layout = QGridLayout(controls)
-        controls_layout.setContentsMargins(18, 16, 18, 16)
-        controls_layout.setHorizontalSpacing(12)
-        controls_layout.setVerticalSpacing(10)
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(14, 12, 14, 12)
+        controls_layout.setSpacing(10)
         self.map_search_input = QLineEdit()
         self.map_search_input.setObjectName("map_search_input")
         self.map_search_input.setPlaceholderText("Search landmarks")
-        self.map_search_input.setMinimumHeight(BUTTON_HEIGHT)
+        self.map_search_input.setMinimumHeight(40)
         completer = QCompleter(list(self.landmarks.keys()), self.map_search_input)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.map_search_input.setCompleter(completer)
         self.map_search_button = QPushButton("Search")
         self.map_search_button.setObjectName("map_search_button")
-        self.map_search_button.setMinimumHeight(BUTTON_HEIGHT)
+        self.map_search_button.setMinimumHeight(40)
         self.map_search_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_search_input.returnPressed.connect(self.search_landmark)
         self.map_search_button.clicked.connect(self.search_landmark)
@@ -437,14 +525,14 @@ class MapScreen(QWidget):
         self.map_to_combo.setObjectName("map_to_combo")
         for combo in (self.map_from_combo, self.map_to_combo):
             combo.addItems(self.landmarks.keys())
-            combo.setMinimumHeight(BUTTON_HEIGHT)
+            combo.setMinimumHeight(40)
         self.map_to_combo.setCurrentText("Cafeteria")
         self.map_find_route_button = QPushButton("Find Route")
         self.map_find_route_button.setObjectName("map_find_route_button")
         self.map_reset_route_button = QPushButton("Reset Route")
         self.map_reset_route_button.setObjectName("map_reset_route_button")
         for button in (self.map_find_route_button, self.map_reset_route_button):
-            button.setMinimumHeight(BUTTON_HEIGHT)
+            button.setMinimumHeight(40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_find_route_button.clicked.connect(self.find_route)
         self.map_reset_route_button.clicked.connect(self.reset_route)
@@ -452,35 +540,49 @@ class MapScreen(QWidget):
         self.map_from_label.setObjectName("map_control_label")
         self.map_to_label = QLabel("To")
         self.map_to_label.setObjectName("map_control_label")
-        controls_layout.addWidget(self.map_search_input, 0, 0, 1, 4)
-        controls_layout.addWidget(self.map_search_button, 0, 4)
-        controls_layout.addWidget(self.map_from_label, 1, 0)
-        controls_layout.addWidget(self.map_from_combo, 1, 1)
-        controls_layout.addWidget(self.map_to_label, 1, 2)
-        controls_layout.addWidget(self.map_to_combo, 1, 3)
-        controls_layout.addWidget(self.map_find_route_button, 1, 4)
-        controls_layout.addWidget(self.map_reset_route_button, 1, 5)
-        controls_layout.setColumnStretch(0, 0)
-        controls_layout.setColumnStretch(1, 2)
-        controls_layout.setColumnStretch(3, 2)
+        self.map_zoom_in_button = QPushButton("+")
+        self.map_zoom_in_button.setObjectName("map_zoom_in_button")
+        self.map_zoom_out_button = QPushButton("-")
+        self.map_zoom_out_button.setObjectName("map_zoom_out_button")
+        self.map_reset_view_button = QPushButton("Reset View")
+        self.map_reset_view_button.setObjectName("map_reset_view_button")
+        for button in (self.map_zoom_in_button, self.map_zoom_out_button, self.map_reset_view_button):
+            button.setMinimumHeight(40)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        controls_layout.addWidget(self.map_search_input, stretch=3)
+        controls_layout.addWidget(self.map_search_button)
+        controls_layout.addWidget(self.map_from_label)
+        controls_layout.addWidget(self.map_from_combo, stretch=2)
+        controls_layout.addWidget(self.map_to_label)
+        controls_layout.addWidget(self.map_to_combo, stretch=2)
+        controls_layout.addWidget(self.map_find_route_button)
+        controls_layout.addWidget(self.map_reset_route_button)
+        controls_layout.addWidget(self.map_zoom_out_button)
+        controls_layout.addWidget(self.map_zoom_in_button)
+        controls_layout.addWidget(self.map_reset_view_button)
         page_layout.addWidget(controls)
 
         body_layout = QHBoxLayout()
-        body_layout.setSpacing(16)
+        body_layout.setSpacing(14)
         self.map_canvas = MapCanvas(self.map_image_path)
         self.map_canvas.landmark_clicked = self._handle_landmark_click
-        body_layout.addWidget(self.map_canvas, stretch=1)
-        body_layout.addWidget(self._create_info_panel())
+        self.map_zoom_in_button.clicked.connect(self.map_canvas.zoom_in)
+        self.map_zoom_out_button.clicked.connect(self.map_canvas.zoom_out)
+        self.map_reset_view_button.clicked.connect(self.map_canvas.reset_view)
+        body_layout.addWidget(self.map_canvas, stretch=3)
+        body_layout.addWidget(self._create_info_panel(), stretch=1)
         page_layout.addLayout(body_layout, stretch=1)
 
     def _create_info_panel(self) -> QFrame:
         """Create the Google Maps-like route info panel."""
         self.map_info_panel = QFrame()
         self.map_info_panel.setObjectName("map_info_panel")
-        self.map_info_panel.setFixedWidth(360)
+        self.map_info_panel.setMinimumWidth(320)
+        self.map_info_panel.setMaximumWidth(360)
         panel_layout = QVBoxLayout(self.map_info_panel)
-        panel_layout.setContentsMargins(20, 20, 20, 20)
-        panel_layout.setSpacing(10)
+        panel_layout.setContentsMargins(18, 18, 18, 18)
+        panel_layout.setSpacing(9)
         eyebrow = QLabel("Walking Navigation")
         self.map_info_eyebrow = eyebrow
         self.map_info_eyebrow.setObjectName("map_info_eyebrow")
@@ -495,7 +597,7 @@ class MapScreen(QWidget):
         self.map_selected_place_label.setWordWrap(True)
         self.map_set_destination_button = QPushButton("Set as Destination")
         self.map_set_destination_button.setObjectName("map_set_destination_button")
-        self.map_set_destination_button.setMinimumHeight(BUTTON_HEIGHT)
+        self.map_set_destination_button.setMinimumHeight(40)
         self.map_set_destination_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_set_destination_button.setEnabled(False)
         self.map_set_destination_button.clicked.connect(self.set_selected_as_destination)
@@ -515,7 +617,7 @@ class MapScreen(QWidget):
         self.map_reset_walk_button = QPushButton("Reset")
         self.map_reset_walk_button.setObjectName("map_reset_walk_button")
         for button in (self.map_start_walk_button, self.map_pause_walk_button, self.map_reset_walk_button):
-            button.setMinimumHeight(BUTTON_HEIGHT)
+            button.setMinimumHeight(40)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             walk_buttons_layout.addWidget(button)
         self.map_start_walk_button.clicked.connect(self.start_walk)
@@ -764,24 +866,24 @@ class MapScreen(QWidget):
 
             QLabel#map_title {{
                 color: {CHARCOAL};
-                {font(30, 850)}
+                {font(28, 850)}
             }}
 
             QLabel#map_subtitle {{
                 color: {TEXT_MUTED};
-                {font(16, 600)}
+                {font(15, 600)}
             }}
 
             QFrame#map_controls_panel,
             QFrame#map_info_panel {{
                 background-color: {WHITE};
                 border: 1px solid {BORDER};
-                border-radius: {px(CARD_RADIUS)};
+                border-radius: {px(8)};
             }}
 
             QLabel#map_control_label {{
                 color: {TEXT_MUTED};
-                {font(13, 800)}
+                {font(12, 850)}
             }}
 
             QLineEdit,
@@ -789,10 +891,10 @@ class MapScreen(QWidget):
                 background-color: {WHITE};
                 color: {TEXT_DARK};
                 border: 1px solid {BORDER};
-                border-radius: {px(14)};
-                padding: 0 {px(14)};
-                min-height: {px(BUTTON_HEIGHT)};
-                {font(14, 750)}
+                border-radius: {px(8)};
+                padding: 0 {px(12)};
+                min-height: {px(40)};
+                {font(13, 750)}
             }}
 
             QLineEdit:focus {{
@@ -803,10 +905,10 @@ class MapScreen(QWidget):
                 background-color: {WHITE};
                 color: {CHARCOAL};
                 border: 1px solid {BORDER};
-                border-radius: {px(14)};
-                padding: 0 {px(14)};
-                min-height: {px(BUTTON_HEIGHT)};
-                {font(14, 800)}
+                border-radius: {px(8)};
+                padding: 0 {px(12)};
+                min-height: {px(40)};
+                {font(13, 800)}
             }}
 
             QPushButton:hover {{
@@ -838,6 +940,18 @@ class MapScreen(QWidget):
                 color: {WHITE};
             }}
 
+            QPushButton#map_zoom_in_button,
+            QPushButton#map_zoom_out_button {{
+                min-width: {px(38)};
+                max-width: {px(38)};
+                padding: 0;
+                {font(17, 850)}
+            }}
+
+            QPushButton#map_reset_view_button {{
+                min-width: {px(92)};
+            }}
+
             QPushButton:disabled {{
                 background-color: {LIGHT_GRAY};
                 color: rgba(34, 43, 55, 130);
@@ -847,7 +961,7 @@ class MapScreen(QWidget):
             QWidget#map_canvas {{
                 background-color: {WHITE};
                 border: 1px solid {BORDER};
-                border-radius: {px(CARD_RADIUS)};
+                border-radius: {px(8)};
             }}
 
             QLabel#map_info_eyebrow {{
@@ -857,19 +971,19 @@ class MapScreen(QWidget):
 
             QLabel#map_info_title {{
                 color: {CHARCOAL};
-                {font(22, 850)}
+                {font(21, 850)}
             }}
 
             QLabel#map_route_info_label {{
                 color: {TEXT_MUTED};
-                {font(15, 650)}
+                {font(14, 650)}
             }}
 
             QLabel#map_selected_place_label {{
                 color: {TEXT_DARK};
                 background-color: {OFF_WHITE};
                 border: 1px solid {BORDER};
-                border-radius: {px(14)};
+                border-radius: {px(8)};
                 padding: {px(12)};
                 {font(14, 650)}
             }}
@@ -877,7 +991,8 @@ class MapScreen(QWidget):
             QLabel#map_route_steps_label {{
                 color: {TEXT_DARK};
                 background-color: #FFF7F7;
-                border-radius: {px(14)};
+                border: 1px solid rgba(215, 25, 32, 80);
+                border-radius: {px(8)};
                 padding: {px(12)};
                 {font(13, 700)}
             }}
@@ -886,7 +1001,7 @@ class MapScreen(QWidget):
                 color: {TEXT_DARK};
                 background-color: {WHITE};
                 border: 1px solid rgba(215, 25, 32, 90);
-                border-radius: {px(14)};
+                border-radius: {px(8)};
                 padding: {px(10)};
                 {font(13, 800)}
             }}

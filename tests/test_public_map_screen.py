@@ -58,6 +58,9 @@ def test_map_screen_required_widgets_exist() -> None:
             ("map_to_combo", QComboBox),
             ("map_find_route_button", QPushButton),
             ("map_reset_route_button", QPushButton),
+            ("map_zoom_in_button", QPushButton),
+            ("map_zoom_out_button", QPushButton),
+            ("map_reset_view_button", QPushButton),
             ("map_start_walk_button", QPushButton),
             ("map_pause_walk_button", QPushButton),
             ("map_reset_walk_button", QPushButton),
@@ -90,7 +93,8 @@ def test_public_main_window_map_page_is_map_screen() -> None:
     window = PublicMainWindow()
     try:
         assert application is not None
-        assert isinstance(window.public_page_stack.widget(1), MapScreen)
+        assert isinstance(window.map_screen, MapScreen)
+        assert window.public_page_stack.indexOf(window.map_screen) == 2
     finally:
         window.close()
 
@@ -142,7 +146,7 @@ def test_show_map_switches_to_map_page() -> None:
     try:
         assert application is not None
         window.show_map()
-        assert window.public_page_stack.currentIndex() == 1
+        assert window.public_page_stack.currentIndex() == window.public_page_stack.indexOf(window.map_screen)
         assert window.public_page_stack.currentWidget() is window.map_screen
     finally:
         window.close()

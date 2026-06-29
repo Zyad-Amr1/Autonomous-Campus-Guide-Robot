@@ -5,6 +5,7 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QScrollArea
 
 from ui.public.screens.chat_screen import ChatScreen
@@ -13,15 +14,21 @@ from ui.public.screens.chat_screen import ChatScreen
 class FakeChatController:
     def __init__(self) -> None:
         self.questions: list[str] = []
+        self.memory_cleared = False
+        self.route = "database_context"
+        self.sources = [{"source": "faq", "title": "Test", "score": 72}]
 
     def answer_question(self, question: str) -> dict:
         self.questions.append(question)
         return {
             "answer": f"Dynamic answer for: {question}",
             "confidence": "high",
-            "sources": [{"source": "faq", "title": "Test"}],
-            "route": "database_context",
+            "sources": self.sources,
+            "route": self.route,
         }
+
+    def clear_memory(self) -> None:
+        self.memory_cleared = True
 
 
 class SlowFakeChatController(FakeChatController):
@@ -65,6 +72,8 @@ def test_chat_required_widgets_exist() -> None:
         assert screen.findChild(QScrollArea, "chat_messages_area") is not None
         assert screen.findChild(QLineEdit, "chat_input") is not None
         assert screen.findChild(QPushButton, "chat_send_button") is not None
+        assert screen.findChild(QPushButton, "chat_clear_button") is not None
+        assert screen.findChild(QPushButton, "chat_retry_button") is not None
         assert screen.findChild(QPushButton, "chat_suggestion_1") is not None
         assert screen.findChild(QPushButton, "chat_suggestion_2") is not None
         assert screen.findChild(QPushButton, "chat_suggestion_3") is not None
@@ -84,7 +93,7 @@ def test_sending_message_adds_user_and_bot_messages() -> None:
         initial_count = len(screen.message_labels)
         screen.chat_input.setText("Where is cafeteria?")
         screen.send_message()
-        _process_until(lambda: len(screen.message_labels) == initial_count + 2)
+        _process_until(lambda: "Dynamic answer" in screen.message_labels[-1].text())
         assert controller.questions == ["Where is cafeteria?"]
         assert screen.chat_input.text() == ""
         assert len(screen.message_labels) == initial_count + 2
@@ -103,10 +112,28 @@ def test_sources_are_displayed_when_returned() -> None:
         screen.chat_input.setText("Where is cafeteria?")
         screen.send_message()
         _process_until(lambda: len(screen.source_labels) == 1)
-        sources_area = screen.findChild(QLabel, "chat_sources_area")
-        assert sources_area is not None
+        assert screen.source_labels
+        sources_area = screen.source_labels[-1]
+        assert sources_area.objectName() == "chat_sources_area"
         assert "Sources:" in sources_area.text()
         assert "FAQ: Test" in sources_area.text()
+        assert "score 72" in sources_area.text()
+    finally:
+        screen.close()
+
+
+def test_no_sources_are_displayed_for_no_context() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+    controller.route = "no_context"
+    controller.sources = [{"source": "faq", "title": "Hidden", "score": 9}]
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Unknown topic")
+        screen.send_message()
+        _process_until(lambda: "Dynamic answer" in screen.message_labels[-1].text())
+        assert screen.source_labels == []
     finally:
         screen.close()
 
@@ -152,5 +179,53 @@ def test_pending_question_is_not_duplicated() -> None:
         screen.handle_pending_question("Who are the professors?")
         _process_until(lambda: len(controller.questions) == 1)
         assert controller.questions == ["Who are the professors?"]
+    finally:
+        screen.close()
+
+
+def test_retry_button_resends_last_question() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        assert screen.chat_retry_button.isEnabled() is False
+        screen.chat_input.setText("Tell me about faculties")
+        screen.send_message()
+        _process_until(lambda: screen.chat_retry_button.isEnabled())
+        screen.chat_retry_button.click()
+        _process_until(lambda: controller.questions == ["Tell me about faculties", "Tell me about faculties"])
+        assert controller.questions == ["Tell me about faculties", "Tell me about faculties"]
+    finally:
+        screen.close()
+
+
+def test_clear_button_clears_messages_and_memory() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Tell me about faculties")
+        screen.send_message()
+        _process_until(lambda: "Dynamic answer" in screen.message_labels[-1].text())
+        screen.chat_clear_button.click()
+        assert controller.memory_cleared is True
+        assert len(screen.message_labels) == 1
+        assert "ECU Smart Assistant" in screen.message_labels[0].text()
+        assert screen.source_labels == []
+        assert screen.chat_retry_button.isEnabled() is False
+    finally:
+        screen.close()
+
+
+def test_arabic_welcome_message_appears_when_language_is_arabic() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=FakeChatController())
+    try:
+        assert application is not None
+        screen.update_language({"chat": "اسأل"})
+        assert "مرحب" in screen.message_labels[0].text()
+        assert screen.layoutDirection() == Qt.LayoutDirection.RightToLeft
     finally:
         screen.close()

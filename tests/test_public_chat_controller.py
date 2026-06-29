@@ -409,6 +409,37 @@ def test_follow_up_question_uses_conversation_memory(tmp_path) -> None:
     assert second["intent"] == "faculty_info"
 
 
+def test_clear_memory_is_safe(tmp_path) -> None:
+    memory = ConversationMemory()
+    memory.add_user_message("Tell me about Engineering")
+    controller = PublicChatController(
+        db_path=_db(tmp_path),
+        llm_provider=None,
+        conversation_memory=memory,
+    )
+
+    controller.clear_memory()
+
+    assert memory.get_recent_messages() == []
+
+
+def test_retry_style_repeated_answer_question_is_safe(tmp_path) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def fake_provider(messages: list[dict[str, str]]) -> str:
+        calls.append(messages)
+        return "Repeated answer."
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=fake_provider)
+
+    first = controller.answer_question("Where is cafeteria?")
+    second = controller.answer_question("Where is cafeteria?")
+
+    assert first["answer"] == "Repeated answer."
+    assert second["answer"] == "Repeated answer."
+    assert len(calls) == 2
+
+
 def test_ambiguous_follow_up_without_context_asks_clarification(tmp_path, monkeypatch) -> None:
     _disable_real_groq(monkeypatch, tmp_path)
     memory = ConversationMemory()

@@ -230,6 +230,13 @@ class PublicChatController:
             intent=detect_intent(question),
         )
 
+    def clear_memory(self) -> None:
+        """Safely clear in-memory conversation context for the public chat."""
+        try:
+            self.conversation_memory.clear()
+        except Exception:
+            return
+
     def generate_fallback_answer(
         self,
         question: str,

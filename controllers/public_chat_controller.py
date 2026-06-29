@@ -9,11 +9,11 @@ from typing import Any, Callable
 
 import requests
 
+from controllers.rag.conversation_memory import ConversationMemory
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
 from controllers.rag.knowledge_store import (
     init_knowledge_store,
     load_knowledge_chunks,
-    search_knowledge_chunks,
 )
 from controllers.rag.prompt_builder import (
     ARABIC_INSUFFICIENT,
@@ -21,6 +21,7 @@ from controllers.rag.prompt_builder import (
     build_rag_prompt,
     detect_language,
 )
+from controllers.rag.query_analyzer import detect_intent, extract_keywords
 from controllers.rag.retriever import retrieve_relevant_chunks
 from database.connection import DB_NAME
 from database.repositories.log_repository import create_log
@@ -130,37 +131,59 @@ class PublicChatController:
         self,
         db_path: str | Path = DB_NAME,
         llm_provider: LLMProvider | None = None,
+        conversation_memory: ConversationMemory | None = None,
     ) -> None:
         self.db_path = db_path
         self.llm_provider = llm_provider if llm_provider is not None else GroqChatProvider.from_environment()
+        self.conversation_memory = conversation_memory or ConversationMemory()
 
     def answer_question(self, question: str) -> dict[str, Any]:
         """Answer a visitor question and include confidence, route, and sources."""
         cleaned_question = question.strip()
+        language = detect_language(cleaned_question)
+        intent = detect_intent(cleaned_question)
         if not cleaned_question:
             return {
                 "answer": ENGLISH_NO_CONTEXT,
                 "confidence": "low",
                 "sources": [],
-                "route": "fallback",
+                "route": "no_context",
+                "intent": "unknown",
+                "language": "en",
             }
 
-        retrieved_chunks = self._retrieve_chunks(cleaned_question)
+        recent_messages = self.conversation_memory.get_recent_messages()
+        retrieval_query = self._expanded_retrieval_query(cleaned_question, recent_messages)
+        retrieval_intent = intent if intent != "unknown" else detect_intent(retrieval_query)
+        retrieved_chunks = self._retrieve_chunks(retrieval_query, retrieval_intent)
         sources = self._sources_from_chunks(retrieved_chunks)
 
         if not retrieved_chunks:
-            answer = self._insufficient_answer(cleaned_question)
+            answer = (
+                self._clarification_answer(cleaned_question)
+                if self._is_ambiguous_follow_up(cleaned_question, recent_messages)
+                else self._insufficient_answer(cleaned_question)
+            )
             self._log_chat(cleaned_question, answer, retrieved_chunks)
+            self._remember_turn(cleaned_question, answer)
             return {
                 "answer": answer,
                 "confidence": "low",
                 "sources": [],
                 "route": "no_context",
+                "intent": retrieval_intent,
+                "language": language,
             }
 
         route = "rag_fallback"
         if self.llm_provider is not None:
-            messages = build_rag_prompt(cleaned_question, retrieved_chunks)
+            messages = build_rag_prompt(
+                cleaned_question,
+                retrieved_chunks,
+                recent_messages=recent_messages,
+                language=language,
+                intent=retrieval_intent,
+            )
             try:
                 provider_response = self.llm_provider(messages)
                 answer = (
@@ -168,7 +191,11 @@ class PublicChatController:
                     if isinstance(provider_response, dict)
                     else str(provider_response).strip()
                 )
-                route = "rag_groq" if answer else "rag_fallback"
+                if answer:
+                    route = "rag_groq"
+                else:
+                    answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
+                    route = "rag_fallback"
             except Exception:
                 answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
                 route = "rag_fallback"
@@ -176,17 +203,32 @@ class PublicChatController:
             answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
 
         confidence = self._confidence_for(retrieved_chunks, route)
+        if confidence == "low":
+            answer = self._with_limited_context_note(answer, cleaned_question)
         self._log_chat(cleaned_question, answer, retrieved_chunks)
+        self._remember_turn(cleaned_question, answer)
         return {
             "answer": answer,
             "confidence": confidence,
             "sources": sources,
             "route": route,
+            "intent": retrieval_intent,
+            "language": language,
         }
 
-    def build_prompt(self, question: str, context_items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    def build_prompt(
+        self,
+        question: str,
+        context_items: list[dict[str, Any]],
+    ) -> list[dict[str, str]]:
         """Build an LLM-ready grounded prompt from retrieved database context."""
-        return build_rag_prompt(question, context_items)
+        return build_rag_prompt(
+            question,
+            context_items,
+            recent_messages=self.conversation_memory.get_recent_messages(),
+            language=detect_language(question),
+            intent=detect_intent(question),
+        )
 
     def generate_fallback_answer(
         self,
@@ -218,7 +260,11 @@ class PublicChatController:
         if not context_items:
             return "low"
         top_score = int(context_items[0].get("score", 0))
-        return "high" if top_score >= 12 else "medium"
+        if top_score >= 18:
+            return "high"
+        if top_score >= 8:
+            return "medium"
+        return "low"
 
     def _log_chat(
         self,
@@ -247,6 +293,20 @@ class PublicChatController:
         """Return the no-context answer in the user's language."""
         return ARABIC_NO_CONTEXT if detect_language(question) == "ar" else ENGLISH_NO_CONTEXT
 
+    def _clarification_answer(self, question: str) -> str:
+        """Ask a short clarification when the follow-up lacks a clear subject."""
+        if detect_language(question) == "ar":
+            return "\u0645\u0645\u0643\u0646 \u062a\u0648\u0636\u062d \u0645\u0627 \u0627\u0644\u0645\u0648\u0636\u0648\u0639 \u0627\u0644\u0630\u064a \u062a\u0642\u0635\u062f\u0647\u061f"
+        return "Could you clarify which ECU topic you mean?"
+
+    def _with_limited_context_note(self, answer: str, question: str) -> str:
+        """Mark weak retrieved context without adding new facts."""
+        if detect_language(question) == "ar":
+            note = "\u0627\u0644\u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u062d\u0629 \u0645\u062d\u062f\u0648\u062f\u0629. "
+        else:
+            note = "Available information is limited. "
+        return answer if answer.startswith(note.strip()) else f"{note}{answer}"
+
     def _sources_from_chunks(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Return public source metadata for retrieved chunks."""
         return [
@@ -258,10 +318,65 @@ class PublicChatController:
             for chunk in chunks
         ]
 
-    def _retrieve_chunks(self, question: str) -> list[dict[str, Any]]:
+    def _expanded_retrieval_query(
+        self,
+        question: str,
+        recent_messages: list[dict[str, str]],
+    ) -> str:
+        """Expand short follow-ups with recent user context."""
+        if not self._is_ambiguous_follow_up(question, recent_messages):
+            return question
+        previous_user_messages = [
+            message["content"]
+            for message in recent_messages
+            if message.get("role") == "user" and message.get("content")
+        ]
+        if not previous_user_messages:
+            return question
+        return f"{previous_user_messages[-1]} {question}"
+
+    def _is_ambiguous_follow_up(
+        self,
+        question: str,
+        recent_messages: list[dict[str, str]],
+    ) -> bool:
+        """Detect short context-dependent questions."""
+        keywords = extract_keywords(question)
+        lowered = question.casefold()
+        follow_up_markers = (
+            " it",
+            " its",
+            "they",
+            "them",
+            "there",
+            "more",
+            "department",
+            "departments",
+            "\u0627\u0642\u0633\u0627\u0645",
+            "\u0623\u0642\u0633\u0627\u0645",
+            "\u0647\u0627",
+            "\u0647\u0648",
+            "\u0647\u064a",
+            "\u0645\u064a\u0646",
+        )
+        return (
+            bool(recent_messages)
+            and len(keywords) <= 4
+            and any(marker in f" {lowered} " for marker in follow_up_markers)
+        )
+
+    def _remember_turn(self, question: str, answer: str) -> None:
+        self.conversation_memory.add_user_message(question)
+        self.conversation_memory.add_assistant_message(answer)
+
+    def _retrieve_chunks(self, question: str, intent: str | None = None) -> list[dict[str, Any]]:
         """Retrieve from persistent store first, then direct DB chunks if empty."""
         init_knowledge_store(self.db_path)
         stored_chunks = load_knowledge_chunks(self.db_path)
         if stored_chunks:
-            return search_knowledge_chunks(question, self.db_path)
-        return retrieve_relevant_chunks(question, build_knowledge_chunks(self.db_path))
+            return retrieve_relevant_chunks(question, stored_chunks, intent=intent)
+        return retrieve_relevant_chunks(
+            question,
+            build_knowledge_chunks(self.db_path),
+            intent=intent,
+        )

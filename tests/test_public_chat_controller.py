@@ -11,6 +11,7 @@ from controllers.public_chat_controller import (
     PublicChatController,
     load_groq_config,
 )
+from controllers.rag.conversation_memory import ConversationMemory
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
 from controllers.rag.knowledge_store import init_knowledge_store, upsert_knowledge_chunks
 from controllers.rag.prompt_builder import build_rag_prompt, detect_language
@@ -135,6 +136,75 @@ def test_retrieval_returns_no_chunks_for_unrelated_question(tmp_path) -> None:
     assert results == []
 
 
+def test_exact_title_match_ranks_higher() -> None:
+    chunks = [
+        {
+            "id": "faculties:1",
+            "source": "faculties",
+            "title": "Faculty of Engineering",
+            "content": "Engineering programs.",
+            "keywords": ["engineering"],
+            "language": "en",
+        },
+        {
+            "id": "faq:1",
+            "source": "faq",
+            "title": "Engineering clubs",
+            "content": "Student club information.",
+            "keywords": ["engineering"],
+            "language": "en",
+        },
+    ]
+
+    results = retrieve_relevant_chunks("Faculty of Engineering", chunks, intent="faculty_info")
+
+    assert results[0]["id"] == "faculties:1"
+    assert results[0]["score"] > results[1]["score"]
+
+
+def test_intent_matching_source_ranks_higher() -> None:
+    chunks = [
+        {
+            "id": "rooms:1",
+            "source": "rooms",
+            "title": "Engineering Hall",
+            "content": "A hall in Building A.",
+            "keywords": ["engineering"],
+            "language": "en",
+        },
+        {
+            "id": "faculties:1",
+            "source": "faculties",
+            "title": "Engineering",
+            "content": "Engineering and robotics programs.",
+            "keywords": ["engineering"],
+            "language": "en",
+        },
+    ]
+
+    results = retrieve_relevant_chunks("Tell me about Engineering", chunks, intent="faculty_info")
+
+    assert results[0]["source"] == "faculties"
+
+
+def test_arabic_query_retrieves_arabic_chunk() -> None:
+    chunks = [
+        {
+            "id": "faculties:ar",
+            "source": "faculties",
+            "title": "كلية الهندسة",
+            "content": "تضم برامج الهندسة والروبوتات.",
+            "keywords": ["كلية", "الهندسة"],
+            "language": "ar",
+        }
+    ]
+
+    results = retrieve_relevant_chunks("ما هي كلية الهندسة؟", chunks, intent="faculty_info")
+
+    assert results
+    assert results[0]["id"] == "faculties:ar"
+
+
 def test_prompt_includes_retrieved_context_and_user_question(tmp_path) -> None:
     chunks = retrieve_relevant_chunks("Where is cafeteria?", build_knowledge_chunks(_db(tmp_path)))
 
@@ -167,6 +237,8 @@ def test_answer_question_returns_no_context_when_nothing_found(tmp_path, monkeyp
     assert result["confidence"] == "low"
     assert result["sources"] == []
     assert result["answer"] == ENGLISH_NO_CONTEXT
+    assert result["intent"] == "unknown"
+    assert result["language"] == "en"
 
 
 def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> None:
@@ -177,6 +249,7 @@ def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> Non
 
     assert result["route"] == "no_context"
     assert result["answer"] == ARABIC_NO_CONTEXT
+    assert result["language"] == "ar"
 
 
 def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) -> None:
@@ -204,6 +277,8 @@ def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) 
     assert result["sources"][0]["id"] == "rooms:custom"
     assert set(result["sources"][0]) == {"source", "title", "id"}
     assert "Student Center entrance" in result["answer"]
+    assert result["intent"] == "room_location"
+    assert result["language"] == "en"
 
 
 def test_empty_knowledge_chunks_falls_back_to_database_rows(tmp_path, monkeypatch) -> None:
@@ -235,6 +310,48 @@ def test_answer_question_uses_fake_llm_provider_when_provided(tmp_path) -> None:
     assert "Cafeteria" in calls[0][1]["content"]
     assert result["route"] == "rag_groq"
     assert result["answer"] == "LLM answer from fake provider."
+    assert result["intent"] == "room_location"
+    assert result["language"] == "en"
+
+
+def test_follow_up_question_uses_conversation_memory(tmp_path) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def fake_provider(messages: list[dict[str, str]]) -> str:
+        calls.append(messages)
+        return "Grounded response."
+
+    memory = ConversationMemory()
+    controller = PublicChatController(
+        db_path=_db(tmp_path),
+        llm_provider=fake_provider,
+        conversation_memory=memory,
+    )
+
+    first = controller.answer_question("Tell me about Faculty of Engineering")
+    second = controller.answer_question("What departments does it have?")
+
+    assert first["route"] == "rag_groq"
+    assert second["route"] == "rag_groq"
+    assert "Tell me about Faculty of Engineering" in calls[-1][1]["content"]
+    assert "Recent conversation:" in calls[-1][1]["content"]
+    assert second["intent"] == "faculty_info"
+
+
+def test_ambiguous_follow_up_without_context_asks_clarification(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    memory = ConversationMemory()
+    memory.add_user_message("Tell me about parking on Mars")
+    controller = PublicChatController(
+        db_path=_db(tmp_path),
+        conversation_memory=memory,
+    )
+
+    result = controller.answer_question("Tell me more")
+
+    assert result["route"] == "no_context"
+    assert result["confidence"] == "low"
+    assert "clarify" in result["answer"].casefold()
 
 
 def test_answer_question_falls_back_safely_when_provider_fails(tmp_path) -> None:

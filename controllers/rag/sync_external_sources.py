@@ -26,11 +26,10 @@ def sync_external_sources_to_knowledge_base(
 
     website_chunks = []
     web_config = root / "web_sources.json"
-    if web_config.exists():
-        try:
-            website_chunks = ingest_web_sources_config(web_config)
-        except Exception as error:
-            errors.append(f"web_sources.json: {error}")
+    try:
+        website_chunks = ingest_web_sources_config(web_config)
+    except Exception as error:
+        errors.append(f"web_sources.json: {error}")
 
     document_chunks = []
     documents_folder = root / "documents"
@@ -46,4 +45,3 @@ def sync_external_sources_to_knowledge_base(
         "document_chunks": len(document_chunks),
         "errors": errors,
     }
-

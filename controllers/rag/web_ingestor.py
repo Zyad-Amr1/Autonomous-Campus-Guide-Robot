@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
 
+from controllers.rag.source_config import load_web_sources
 from controllers.rag.text_cleaner import clean_text, detect_language, split_text_into_chunks
 
 
@@ -59,17 +59,12 @@ def ingest_web_page(url: str, title: str | None = None) -> list[dict[str, Any]]:
 
 def ingest_web_sources_config(config_path: str | Path) -> list[dict[str, Any]]:
     """Ingest all enabled website sources from a JSON config file."""
-    path = Path(config_path)
-    try:
-        config = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
     chunks: list[dict[str, Any]] = []
-    for source in config.get("sources", []) if isinstance(config, dict) else []:
-        if not isinstance(source, dict) or not source.get("enabled", True):
+    for source in load_web_sources(config_path):
+        if not source.get("enabled", True):
             continue
         url = str(source.get("url") or "").strip()
-        if not url or url == "PUT_URL_HERE":
+        if not url:
             continue
         chunks.extend(ingest_web_page(url, title=source.get("name")))
     return chunks

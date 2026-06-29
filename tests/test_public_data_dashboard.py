@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
 )
@@ -63,6 +64,14 @@ def test_required_widgets_exist(tmp_path) -> None:
             ("chatbot_eval_button", QPushButton),
             ("chatbot_debug_status_button", QPushButton),
             ("chatbot_eval_status_label", QLabel),
+            ("kb_source_name_input", QLineEdit),
+            ("kb_source_url_input", QLineEdit),
+            ("kb_add_source_button", QPushButton),
+            ("kb_remove_source_button", QPushButton),
+            ("kb_toggle_source_button", QPushButton),
+            ("kb_sources_table", QTableWidget),
+            ("kb_upload_document_button", QPushButton),
+            ("kb_open_documents_folder_button", QPushButton),
         ):
             assert screen.findChild(widget_type, object_name) is not None
     finally:
@@ -162,8 +171,8 @@ def test_sync_external_button_calls_sync_function(tmp_path, monkeypatch) -> None
     db_path = _create_temp_db(tmp_path)
     calls = []
 
-    def fake_sync(path):
-        calls.append(path)
+    def fake_sync(path, sources_root):
+        calls.append((path, sources_root))
         return {"website_chunks": 2, "document_chunks": 3, "errors": []}
 
     monkeypatch.setattr(
@@ -174,9 +183,9 @@ def test_sync_external_button_calls_sync_function(tmp_path, monkeypatch) -> None
     try:
         assert application is not None
         screen.kb_sync_external_button.click()
-        assert calls == [db_path]
-        assert "2 website" in screen.kb_status_label.text()
-        assert "3 document" in screen.kb_status_label.text()
+        assert calls == [(db_path, screen.sources_root)]
+        assert "Website chunks: 2" in screen.kb_status_label.text()
+        assert "Document chunks: 3" in screen.kb_status_label.text()
     finally:
         screen.close()
 
@@ -218,6 +227,127 @@ def test_knowledge_sync_failure_does_not_crash(tmp_path, monkeypatch) -> None:
         assert application is not None
         screen.kb_sync_database_button.click()
         assert "Could not sync database knowledge" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_source_manager_widgets_exist(tmp_path) -> None:
+    application = _get_application()
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        assert screen.kb_add_source_button.text() == "Add Website Source"
+        assert screen.kb_remove_source_button.text() == "Remove Selected Source"
+        assert screen.kb_toggle_source_button.text() == "Enable/Disable Selected Source"
+        assert screen.kb_upload_document_button.text() == "Upload Document"
+        assert screen.kb_open_documents_folder_button.text() == "Open Documents Folder"
+    finally:
+        screen.close()
+
+
+def test_add_source_updates_table_and_status(tmp_path) -> None:
+    application = _get_application()
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_source_name_input.setText("ECU")
+        screen.kb_source_url_input.setText("https://example.edu")
+        screen.kb_add_source_button.click()
+        assert screen.kb_sources_table.rowCount() == 1
+        assert screen.kb_sources_table.item(0, 0).text() == "ECU"
+        assert "Added website source" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_remove_selected_source_updates_table_and_status(tmp_path) -> None:
+    application = _get_application()
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_source_name_input.setText("ECU")
+        screen.kb_source_url_input.setText("https://example.edu")
+        screen.kb_add_source_button.click()
+        screen.kb_sources_table.selectRow(0)
+        screen.kb_remove_source_button.click()
+        assert screen.kb_sources_table.rowCount() == 0
+        assert "Removed selected source" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_toggle_selected_source_updates_enabled_state(tmp_path) -> None:
+    application = _get_application()
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_source_name_input.setText("ECU")
+        screen.kb_source_url_input.setText("https://example.edu")
+        screen.kb_add_source_button.click()
+        screen.kb_sources_table.selectRow(0)
+        screen.kb_toggle_source_button.click()
+        assert screen.kb_sources_table.item(0, 2).text() == "No"
+        screen.kb_sources_table.selectRow(0)
+        screen.kb_toggle_source_button.click()
+        assert screen.kb_sources_table.item(0, 2).text() == "Yes"
+    finally:
+        screen.close()
+
+
+def test_upload_document_copies_file(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+    source_file = tmp_path / "source.txt"
+    source_file.write_text("Document text", encoding="utf-8")
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.QFileDialog.getOpenFileName",
+        lambda *args, **kwargs: (str(source_file), ""),
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_upload_document_button.click()
+        assert (screen.documents_folder / "source.txt").exists()
+        assert "Uploaded document" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_sync_external_updates_status_safely(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+
+    def fake_sync(path, sources_root="knowledge_sources"):
+        return {"website_chunks": 4, "document_chunks": 2, "errors": ["one"]}
+
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.sync_external_sources_to_knowledge_base",
+        fake_sync,
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_sync_external_button.click()
+        assert "Website chunks: 4" in screen.kb_status_label.text()
+        assert "Document chunks: 2" in screen.kb_status_label.text()
+        assert "Errors: 1" in screen.kb_status_label.text()
+    finally:
+        screen.close()
+
+
+def test_sync_external_failure_does_not_crash(tmp_path, monkeypatch) -> None:
+    application = _get_application()
+
+    def failing_sync(path, sources_root="knowledge_sources"):
+        raise RuntimeError("network unavailable")
+
+    monkeypatch.setattr(
+        "ui.public.screens.data_dashboard_screen.sync_external_sources_to_knowledge_base",
+        failing_sync,
+    )
+    screen = DataDashboardScreen(db_path=_create_temp_db(tmp_path))
+    try:
+        assert application is not None
+        screen.kb_sync_external_button.click()
+        assert "Could not sync website/documents" in screen.kb_status_label.text()
     finally:
         screen.close()
 

@@ -1,14 +1,18 @@
 """Unified protected data management area inside the public dashboard."""
 
+import shutil
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -37,6 +41,13 @@ from controllers.professor_csv_controller import (
 from controllers.public_chat_controller import PublicChatController, load_groq_config
 from controllers.rag.evaluator import run_chatbot_evaluation
 from controllers.rag.knowledge_store import load_knowledge_chunks
+from controllers.rag.document_ingestor import SUPPORTED_EXTENSIONS
+from controllers.rag.source_config import (
+    add_web_source,
+    load_web_sources,
+    remove_web_source,
+    set_web_source_enabled,
+)
 from controllers.rag.sync_external_sources import sync_external_sources_to_knowledge_base
 from controllers.rag.sync_knowledge_base import sync_database_to_knowledge_base
 from controllers.room_csv_controller import export_rooms_to_csv, import_rooms_from_csv
@@ -195,6 +206,10 @@ class DataDashboardScreen(QWidget):
         """Create the protected data dashboard."""
         super().__init__()
         self.db_path = db_path
+        db_parent = Path(db_path).parent
+        self.sources_root = db_parent / "knowledge_sources"
+        self.web_sources_config_path = self.sources_root / "web_sources.json"
+        self.documents_folder = self.sources_root / "documents"
         self._last_sync_status = "No sync run in this session."
         self.setObjectName("data_dashboard_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -300,6 +315,74 @@ class DataDashboardScreen(QWidget):
         knowledge_layout.addLayout(knowledge_button_row)
         page_layout.addWidget(knowledge_panel)
 
+        sources_panel = QFrame()
+        sources_panel.setObjectName("knowledge_sources_panel")
+        sources_layout = QVBoxLayout(sources_panel)
+        sources_layout.setContentsMargins(16, 14, 16, 14)
+        sources_layout.setSpacing(10)
+
+        self.kb_sources_title = QLabel("Knowledge Sources")
+        self.kb_sources_title.setObjectName("kb_sources_title")
+        sources_layout.addWidget(self.kb_sources_title)
+
+        source_form_row = QHBoxLayout()
+        source_form_row.setSpacing(10)
+        self.kb_source_name_input = QLineEdit()
+        self.kb_source_name_input.setObjectName("kb_source_name_input")
+        self.kb_source_name_input.setPlaceholderText("Website name")
+        self.kb_source_url_input = QLineEdit()
+        self.kb_source_url_input.setObjectName("kb_source_url_input")
+        self.kb_source_url_input.setPlaceholderText("https://example.edu/page")
+        self.kb_add_source_button = QPushButton("Add Website Source")
+        self.kb_add_source_button.setObjectName("kb_add_source_button")
+        for widget in (
+            self.kb_source_name_input,
+            self.kb_source_url_input,
+            self.kb_add_source_button,
+        ):
+            if isinstance(widget, QPushButton):
+                widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            source_form_row.addWidget(widget)
+        source_form_row.setStretch(0, 1)
+        source_form_row.setStretch(1, 2)
+        sources_layout.addLayout(source_form_row)
+
+        self.kb_sources_table = QTableWidget()
+        self.kb_sources_table.setObjectName("kb_sources_table")
+        self.kb_sources_table.setColumnCount(3)
+        self.kb_sources_table.setHorizontalHeaderLabels(["Name", "URL", "Enabled"])
+        self.kb_sources_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.kb_sources_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.kb_sources_table.setAlternatingRowColors(True)
+        sources_layout.addWidget(self.kb_sources_table)
+
+        source_actions_row = QHBoxLayout()
+        source_actions_row.setSpacing(10)
+        self.kb_remove_source_button = QPushButton("Remove Selected Source")
+        self.kb_remove_source_button.setObjectName("kb_remove_source_button")
+        self.kb_toggle_source_button = QPushButton("Enable/Disable Selected Source")
+        self.kb_toggle_source_button.setObjectName("kb_toggle_source_button")
+        self.kb_upload_document_button = QPushButton("Upload Document")
+        self.kb_upload_document_button.setObjectName("kb_upload_document_button")
+        self.kb_open_documents_folder_button = QPushButton("Open Documents Folder")
+        self.kb_open_documents_folder_button.setObjectName("kb_open_documents_folder_button")
+        for button in (
+            self.kb_remove_source_button,
+            self.kb_toggle_source_button,
+            self.kb_upload_document_button,
+            self.kb_open_documents_folder_button,
+        ):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            source_actions_row.addWidget(button)
+        sources_layout.addLayout(source_actions_row)
+
+        self.kb_add_source_button.clicked.connect(self.add_website_source)
+        self.kb_remove_source_button.clicked.connect(self.remove_selected_source)
+        self.kb_toggle_source_button.clicked.connect(self.toggle_selected_source)
+        self.kb_upload_document_button.clicked.connect(self.upload_document_source)
+        self.kb_open_documents_folder_button.clicked.connect(self.open_documents_folder)
+        page_layout.addWidget(sources_panel)
+
         evaluation_panel = QFrame()
         evaluation_panel.setObjectName("chatbot_evaluation_panel")
         evaluation_layout = QVBoxLayout(evaluation_panel)
@@ -343,6 +426,7 @@ class DataDashboardScreen(QWidget):
         self.data_status_label.setObjectName("data_status_label")
         self.data_status_label.setWordWrap(True)
         page_layout.addWidget(self.data_status_label)
+        self.refresh_sources_table()
 
     def load_selected_dataset(self) -> None:
         """Load the selected dataset into the table without crashing."""
@@ -460,7 +544,7 @@ class DataDashboardScreen(QWidget):
     def sync_external_knowledge(self) -> None:
         """Sync website and document sources into the chatbot knowledge store."""
         try:
-            result = sync_external_sources_to_knowledge_base(self.db_path)
+            result = sync_external_sources_to_knowledge_base(self.db_path, self.sources_root)
         except Exception as error:
             self._set_kb_status(f"Could not sync website/documents: {error}")
             return
@@ -468,8 +552,8 @@ class DataDashboardScreen(QWidget):
         document_chunks = int(result.get("document_chunks", 0))
         errors = result.get("errors") or []
         message = (
-            f"Synced {website_chunks} website chunk(s) and "
-            f"{document_chunks} document chunk(s)."
+            f"Website chunks: {website_chunks} | Document chunks: {document_chunks} | "
+            f"Errors: {len(errors)}"
         )
         if errors:
             message += f" Some sources need attention: {len(errors)} issue(s)."
@@ -480,7 +564,10 @@ class DataDashboardScreen(QWidget):
         """Rebuild database, website, and document knowledge in one action."""
         try:
             database_result = sync_database_to_knowledge_base(self.db_path)
-            external_result = sync_external_sources_to_knowledge_base(self.db_path)
+            external_result = sync_external_sources_to_knowledge_base(
+                self.db_path,
+                self.sources_root,
+            )
         except Exception as error:
             self._set_kb_status(f"Could not rebuild all knowledge: {error}")
             return
@@ -515,6 +602,119 @@ class DataDashboardScreen(QWidget):
             f"{source}: {count}" for source, count in sorted(counts.items())
         )
         self._set_kb_status(f"Knowledge chunks: {len(chunks)} total ({grouped}).")
+
+    def refresh_sources_table(self) -> None:
+        """Refresh configured website sources and compact source counts."""
+        sources = load_web_sources(self.web_sources_config_path)
+        self.kb_sources_table.setRowCount(len(sources))
+        for row_index, source in enumerate(sources):
+            name_item = QTableWidgetItem(source["name"])
+            url_item = QTableWidgetItem(source["url"])
+            enabled_item = QTableWidgetItem("Yes" if source.get("enabled", True) else "No")
+            for item in (name_item, url_item, enabled_item):
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.kb_sources_table.setItem(row_index, 0, name_item)
+            self.kb_sources_table.setItem(row_index, 1, url_item)
+            self.kb_sources_table.setItem(row_index, 2, enabled_item)
+        self.kb_sources_table.resizeColumnsToContents()
+        self._set_sources_status()
+
+    def add_website_source(self) -> None:
+        """Add a website source to web_sources.json and refresh the table."""
+        name = self.kb_source_name_input.text().strip()
+        url = self.kb_source_url_input.text().strip()
+        try:
+            add_web_source(name, url, config_path=self.web_sources_config_path)
+        except Exception as error:
+            self._set_kb_status(f"Could not add website source: {error}")
+            return
+        self.kb_source_name_input.clear()
+        self.kb_source_url_input.clear()
+        self.refresh_sources_table()
+        self._set_kb_status(f"Added website source: {name or url}")
+
+    def remove_selected_source(self) -> None:
+        """Remove the selected website source from the config."""
+        url = self._selected_source_url()
+        if not url:
+            self._set_kb_status("Select a source before removing.")
+            return
+        removed = remove_web_source(url, config_path=self.web_sources_config_path)
+        self.refresh_sources_table()
+        self._set_kb_status("Removed selected source." if removed else "Source was not found.")
+
+    def toggle_selected_source(self) -> None:
+        """Toggle enabled state for the selected website source."""
+        row = self.kb_sources_table.currentRow()
+        url = self._selected_source_url()
+        if row < 0 or not url:
+            self._set_kb_status("Select a source before toggling.")
+            return
+        enabled_item = self.kb_sources_table.item(row, 2)
+        next_enabled = enabled_item is not None and enabled_item.text() != "Yes"
+        changed = set_web_source_enabled(
+            url,
+            next_enabled,
+            config_path=self.web_sources_config_path,
+        )
+        self.refresh_sources_table()
+        state = "enabled" if next_enabled else "disabled"
+        self._set_kb_status(f"Source {state}." if changed else "Source was not found.")
+
+    def upload_document_source(self) -> None:
+        """Copy a selected local document into knowledge_sources/documents."""
+        filters = "Documents (*.pdf *.txt *.md *.csv)"
+        file_path, _ = QFileDialog.getOpenFileName(self, "Upload Document", "", filters)
+        if not file_path:
+            return
+        source_path = Path(file_path)
+        if source_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            self._set_kb_status("Unsupported document type.")
+            return
+        try:
+            self.documents_folder.mkdir(parents=True, exist_ok=True)
+            destination = self.documents_folder / source_path.name
+            shutil.copy2(source_path, destination)
+        except Exception as error:
+            self._set_kb_status(f"Could not upload document: {error}")
+            return
+        self._set_sources_status(f"Uploaded document: {source_path.name}")
+
+    def open_documents_folder(self) -> None:
+        """Create and open the local documents source folder."""
+        try:
+            self.documents_folder.mkdir(parents=True, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.documents_folder.resolve())))
+        except Exception as error:
+            self._set_kb_status(f"Could not open documents folder: {error}")
+            return
+        self._set_kb_status(f"Documents folder ready: {self.documents_folder}")
+
+    def _selected_source_url(self) -> str:
+        row = self.kb_sources_table.currentRow()
+        if row < 0:
+            return ""
+        item = self.kb_sources_table.item(row, 1)
+        return item.text().strip() if item is not None else ""
+
+    def _set_sources_status(self, prefix: str | None = None) -> None:
+        sources = load_web_sources(self.web_sources_config_path)
+        enabled = sum(1 for source in sources if source.get("enabled", True))
+        document_count = self._document_count()
+        message = (
+            f"{len(sources)} web source(s), {enabled} enabled, "
+            f"{document_count} document(s). Last sync: {self._last_sync_status}"
+        )
+        self._set_kb_status(f"{prefix}. {message}" if prefix else message)
+
+    def _document_count(self) -> int:
+        if not self.documents_folder.exists():
+            return 0
+        return sum(
+            1
+            for path in self.documents_folder.iterdir()
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        )
 
     def run_chatbot_evaluation(self) -> None:
         """Run prepared chatbot evaluation questions and show the pass count."""
@@ -702,17 +902,30 @@ class DataDashboardScreen(QWidget):
             }}
 
             QLabel#kb_section_title,
-            QLabel#chatbot_eval_title {{
+            QLabel#chatbot_eval_title,
+            QLabel#kb_sources_title {{
                 color: {CHARCOAL};
                 {font(18, 850)}
             }}
 
             QFrame#data_toolbar,
             QFrame#knowledge_base_panel,
-            QFrame#chatbot_evaluation_panel {{
+            QFrame#chatbot_evaluation_panel,
+            QFrame#knowledge_sources_panel {{
                 background-color: {WHITE};
                 border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS)};
+            }}
+
+            QLineEdit#kb_source_name_input,
+            QLineEdit#kb_source_url_input {{
+                background-color: {WHITE};
+                color: {TEXT_DARK};
+                border: 1px solid {BORDER};
+                border-radius: {px(14)};
+                padding: 0 {px(14)};
+                min-height: {px(BUTTON_HEIGHT)};
+                {font(14, 650)}
             }}
 
             QComboBox#data_dataset_selector {{
@@ -744,7 +957,8 @@ class DataDashboardScreen(QWidget):
                 color: {TEXT_DARK};
             }}
 
-            QTableWidget#data_table {{
+            QTableWidget#data_table,
+            QTableWidget#kb_sources_table {{
                 background-color: {WHITE};
                 alternate-background-color: {LIGHT_GRAY};
                 color: {TEXT_DARK};

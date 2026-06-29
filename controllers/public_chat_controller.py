@@ -9,18 +9,22 @@ from typing import Any, Callable
 
 import requests
 
-from controllers.university_context_controller import search_university_context
+from controllers.rag.knowledge_chunker import build_knowledge_chunks
+from controllers.rag.prompt_builder import (
+    ARABIC_INSUFFICIENT,
+    ENGLISH_INSUFFICIENT,
+    build_rag_prompt,
+    detect_language,
+)
+from controllers.rag.retriever import retrieve_relevant_chunks
 from database.connection import DB_NAME
 from database.repositories.log_repository import create_log
 
 
-LLMProvider = Callable[[str], str | dict[str, Any]]
+LLMProvider = Callable[[list[dict[str, str]]], str | dict[str, Any]]
 
-ENGLISH_NO_CONTEXT = "I do not have enough information about that yet."
-ARABIC_NO_CONTEXT = (
-    "\u0644\u0627 \u0623\u0645\u0644\u0643 \u0645\u0639\u0644\u0648\u0645\u0627\u062a "
-    "\u0643\u0627\u0641\u064a\u0629 \u0639\u0646 \u0647\u0630\u0627 \u062d\u0627\u0644\u064a\u0627."
-)
+ENGLISH_NO_CONTEXT = ENGLISH_INSUFFICIENT
+ARABIC_NO_CONTEXT = ARABIC_INSUFFICIENT
 GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
@@ -93,7 +97,7 @@ class GroqChatProvider:
             return None
         return cls(api_key=config["api_key"], model=config["model"])
 
-    def __call__(self, prompt: str) -> str:
+    def __call__(self, messages: list[dict[str, str]]) -> str:
         """Call Groq's OpenAI-compatible chat completions endpoint."""
         response = requests.post(
             self.API_URL,
@@ -103,17 +107,7 @@ class GroqChatProvider:
             },
             json={
                 "model": self.model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are ECU Smart Assistant. Answer only from the supplied "
-                            "university context. If the context is insufficient, say: "
-                            f"{ENGLISH_NO_CONTEXT}"
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
+                "messages": messages,
                 "temperature": 0.2,
                 "max_tokens": 450,
             },
@@ -146,38 +140,39 @@ class PublicChatController:
                 "route": "fallback",
             }
 
-        context_items = search_university_context(cleaned_question, self.db_path)
-        sources = [
-            {
-                "source_type": item["source_type"],
-                "id": item.get("id"),
-                "title": item["title"],
-                "snippet": item["snippet"],
-            }
-            for item in context_items
-        ]
+        chunks = build_knowledge_chunks(self.db_path)
+        retrieved_chunks = retrieve_relevant_chunks(cleaned_question, chunks)
+        sources = self._sources_from_chunks(retrieved_chunks)
 
-        route = "database_context"
-        if self.llm_provider is not None and context_items:
-            prompt = self.build_prompt(cleaned_question, context_items)
+        if not retrieved_chunks:
+            answer = self._insufficient_answer(cleaned_question)
+            self._log_chat(cleaned_question, answer, retrieved_chunks)
+            return {
+                "answer": answer,
+                "confidence": "low",
+                "sources": [],
+                "route": "no_context",
+            }
+
+        route = "rag_fallback"
+        if self.llm_provider is not None:
+            messages = build_rag_prompt(cleaned_question, retrieved_chunks)
             try:
-                provider_response = self.llm_provider(prompt)
+                provider_response = self.llm_provider(messages)
                 answer = (
                     str(provider_response.get("answer", "")).strip()
                     if isinstance(provider_response, dict)
                     else str(provider_response).strip()
                 )
-                route = "llm" if answer else "fallback"
+                route = "rag_groq" if answer else "rag_fallback"
             except Exception:
-                answer = self.generate_fallback_answer(cleaned_question, context_items)
-                route = "fallback"
+                answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
+                route = "rag_fallback"
         else:
-            answer = self.generate_fallback_answer(cleaned_question, context_items)
-            if not context_items:
-                route = "fallback"
+            answer = self.generate_fallback_answer(cleaned_question, retrieved_chunks)
 
-        confidence = self._confidence_for(context_items, route)
-        self._log_chat(cleaned_question, answer, context_items)
+        confidence = self._confidence_for(retrieved_chunks, route)
+        self._log_chat(cleaned_question, answer, retrieved_chunks)
         return {
             "answer": answer,
             "confidence": confidence,
@@ -185,22 +180,9 @@ class PublicChatController:
             "route": route,
         }
 
-    def build_prompt(self, question: str, context_items: list[dict[str, Any]]) -> str:
+    def build_prompt(self, question: str, context_items: list[dict[str, Any]]) -> list[dict[str, str]]:
         """Build an LLM-ready grounded prompt from retrieved database context."""
-        context_lines = "\n".join(
-            f"- [{item['source_type']}] {item['title']}: {item['snippet']}"
-            for item in context_items
-        ) or "No matching university context was found."
-        return (
-            "You are ECU Smart Assistant.\n"
-            "Answer using only the provided university context.\n"
-            f"If the answer is not in the context, say exactly: {ENGLISH_NO_CONTEXT}\n"
-            "Keep the answer concise and helpful.\n"
-            "Support English or Arabic depending on the user's question language.\n\n"
-            f"University context:\n{context_lines}\n\n"
-            f"Question: {question}\n"
-            "Answer:"
-        )
+        return build_rag_prompt(question, context_items)
 
     def generate_fallback_answer(
         self,
@@ -209,20 +191,25 @@ class PublicChatController:
     ) -> str:
         """Generate a concise answer directly from retrieved database context."""
         if not context_items:
-            return ARABIC_NO_CONTEXT if _is_arabic(question) else ENGLISH_NO_CONTEXT
+            return self._insufficient_answer(question)
 
-        best = context_items[0]
-        source_type = str(best["source_type"]).replace("_", " ")
-        answer = str(best["snippet"]).strip()
-        if _is_arabic(question):
-            return (
-                "\u0648\u062c\u062f\u062a \u0647\u0630\u0647 \u0627\u0644\u0645\u0639\u0644\u0648\u0645\u0629 "
-                f"\u0641\u064a \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0627\u0645\u0639\u0629 ({source_type}): {answer}"
+        top_chunks = context_items[:3]
+        if detect_language(question) == "ar":
+            details = " ".join(
+                f"{chunk['title']}: {chunk['content']}" for chunk in top_chunks
             )
-        return f"From ECU {source_type}: {answer}"
+            return (
+                "\u0628\u0646\u0627\u0621 \u0639\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a "
+                f"\u0627\u0644\u062c\u0627\u0645\u0639\u0629: {details}"
+            )
+
+        details = " ".join(
+            f"{chunk['title']}: {chunk['content']}" for chunk in top_chunks
+        )
+        return f"Based on ECU university data: {details}"
 
     def _confidence_for(self, context_items: list[dict[str, Any]], route: str) -> str:
-        if route == "llm" and context_items:
+        if route == "rag_groq" and context_items:
             return "high"
         if not context_items:
             return "low"
@@ -238,6 +225,9 @@ class PublicChatController:
         matched_faq_id = None
         if context_items and context_items[0].get("source_type") == "faq":
             matched_faq_id = context_items[0].get("id")
+        elif context_items and context_items[0].get("source") == "faq":
+            raw_id = str(context_items[0].get("id", "")).split(":", maxsplit=1)[-1]
+            matched_faq_id = int(raw_id) if raw_id.isdigit() else None
         try:
             create_log(
                 question,
@@ -248,3 +238,21 @@ class PublicChatController:
             )
         except Exception:
             return
+
+    def _insufficient_answer(self, question: str) -> str:
+        """Return the no-context answer in the user's language."""
+        return ARABIC_NO_CONTEXT if detect_language(question) == "ar" else ENGLISH_NO_CONTEXT
+
+    def _sources_from_chunks(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return public source metadata for retrieved chunks."""
+        return [
+            {
+                "source": chunk["source"],
+                "source_type": chunk["source"],
+                "id": chunk["id"],
+                "title": chunk["title"],
+                "snippet": chunk["content"],
+                "score": chunk.get("score", 0),
+            }
+            for chunk in chunks
+        ]

@@ -1,16 +1,19 @@
-"""Tests for the public dynamic chatbot controller."""
+"""Tests for the public custom RAG chatbot controller."""
 
 from __future__ import annotations
 
 import sqlite3
 
 from controllers.public_chat_controller import (
+    ARABIC_NO_CONTEXT,
     ENGLISH_NO_CONTEXT,
     GroqChatProvider,
     PublicChatController,
     load_groq_config,
 )
-from controllers.university_context_controller import search_university_context
+from controllers.rag.knowledge_chunker import build_knowledge_chunks
+from controllers.rag.prompt_builder import build_rag_prompt, detect_language
+from controllers.rag.retriever import retrieve_relevant_chunks
 from database.init_db import initialize_database
 
 
@@ -78,77 +81,140 @@ def _db(tmp_path):
     return db_path
 
 
-def test_search_university_context_returns_best_snippets(tmp_path) -> None:
-    db_path = _db(tmp_path)
-
-    results = search_university_context("Where is cafeteria?", db_path)
-
-    assert results
-    assert results[0]["source_type"] == "rooms"
-    assert "Cafeteria" in results[0]["snippet"]
-
-
-def test_no_api_key_uses_fallback(tmp_path, monkeypatch) -> None:
+def _disable_real_groq(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_MODEL", raising=False)
-    controller = PublicChatController(db_path=_db(tmp_path))
-
-    result = controller.answer_question("Where is student affairs?")
-
-    assert controller.llm_provider is None
-    assert result["route"] == "database_context"
-    assert "Student affairs is in Building B" in result["answer"]
+    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
 
 
-def test_public_chat_controller_returns_dynamic_answer_from_faq_context(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    controller = PublicChatController(db_path=_db(tmp_path))
+def test_chunks_are_created_from_fake_sqlite_data(tmp_path) -> None:
+    chunks = build_knowledge_chunks(_db(tmp_path))
 
-    result = controller.answer_question("Where is student affairs?")
-
-    assert result["route"] == "database_context"
-    assert result["confidence"] in {"high", "medium"}
-    assert "Student affairs is in Building B" in result["answer"]
-    assert result["sources"][0]["source_type"] == "faq"
+    sources = {chunk["source"] for chunk in chunks}
+    assert {"faculties", "professors", "rooms", "courses", "events", "faq"} <= sources
+    assert all({"id", "source", "title", "content", "keywords", "language"} <= set(chunk) for chunk in chunks)
+    assert any(chunk["title"] == "Engineering" for chunk in chunks)
 
 
-def test_public_chat_controller_returns_professor_answer(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    controller = PublicChatController(db_path=_db(tmp_path))
+def test_retrieval_returns_relevant_faculty_chunk(tmp_path) -> None:
+    chunks = build_knowledge_chunks(_db(tmp_path))
 
-    result = controller.answer_question("Who are the professors?")
+    results = retrieve_relevant_chunks("Tell me about faculties", chunks)
 
-    assert "Dr. Mona Hassan" in result["answer"]
-    assert result["sources"][0]["source_type"] == "professors"
-
-
-def test_public_chat_controller_returns_room_answer(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    controller = PublicChatController(db_path=_db(tmp_path))
-
-    result = controller.answer_question("Where is cafeteria?")
-
-    assert "Cafeteria" in result["answer"]
-    assert "Student Center" in result["answer"]
-    assert result["sources"][0]["source_type"] == "rooms"
+    assert results
+    assert results[0]["source"] == "faculties"
+    assert "Engineering" in results[0]["title"]
 
 
-def test_fallback_works_when_no_context_found(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+def test_retrieval_returns_relevant_professor_chunk(tmp_path) -> None:
+    chunks = build_knowledge_chunks(_db(tmp_path))
+
+    results = retrieve_relevant_chunks("Who are the professors?", chunks)
+
+    assert results
+    assert results[0]["source"] == "professors"
+    assert "Dr. Mona Hassan" in results[0]["title"]
+
+
+def test_retrieval_returns_relevant_room_chunk(tmp_path) -> None:
+    chunks = build_knowledge_chunks(_db(tmp_path))
+
+    results = retrieve_relevant_chunks("Where is cafeteria?", chunks)
+
+    assert results
+    assert results[0]["source"] == "rooms"
+    assert "Cafeteria" in results[0]["title"]
+
+
+def test_retrieval_returns_no_chunks_for_unrelated_question(tmp_path) -> None:
+    chunks = build_knowledge_chunks(_db(tmp_path))
+
+    results = retrieve_relevant_chunks("Tell me about parking permits on Mars", chunks)
+
+    assert results == []
+
+
+def test_prompt_includes_retrieved_context_and_user_question(tmp_path) -> None:
+    chunks = retrieve_relevant_chunks("Where is cafeteria?", build_knowledge_chunks(_db(tmp_path)))
+
+    messages = build_rag_prompt("Where is cafeteria?", chunks)
+
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert "ECU Smart Assistant" in messages[0]["content"]
+    assert "Cafeteria" in messages[1]["content"]
+    assert "Where is cafeteria?" in messages[1]["content"]
+
+
+def test_arabic_question_produces_arabic_instruction(tmp_path) -> None:
+    chunks = retrieve_relevant_chunks("ما هي كليات الجامعة؟", build_knowledge_chunks(_db(tmp_path)))
+
+    messages = build_rag_prompt("ما هي كليات الجامعة؟", chunks)
+
+    assert detect_language("ما هي كليات الجامعة؟") == "ar"
+    assert "Answer in Arabic." in messages[0]["content"]
+    assert ARABIC_NO_CONTEXT in messages[0]["content"]
+
+
+def test_answer_question_returns_no_context_when_nothing_found(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
     controller = PublicChatController(db_path=_db(tmp_path))
 
     result = controller.answer_question("Tell me about parking permits on Mars")
 
-    assert result["route"] == "fallback"
+    assert result["route"] == "no_context"
     assert result["confidence"] == "low"
     assert result["sources"] == []
     assert result["answer"] == ENGLISH_NO_CONTEXT
 
 
+def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("أين موقف السيارات على المريخ؟")
+
+    assert result["route"] == "no_context"
+    assert result["answer"] == ARABIC_NO_CONTEXT
+
+
+def test_answer_question_uses_fake_llm_provider_when_provided(tmp_path) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def fake_provider(messages: list[dict[str, str]]) -> str:
+        calls.append(messages)
+        return "LLM answer from fake provider."
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=fake_provider)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert calls
+    assert calls[0][0]["role"] == "system"
+    assert "Cafeteria" in calls[0][1]["content"]
+    assert result["route"] == "rag_groq"
+    assert result["answer"] == "LLM answer from fake provider."
+
+
+def test_answer_question_falls_back_safely_when_provider_fails(tmp_path) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def failing_provider(messages: list[dict[str, str]]) -> str:
+        calls.append(messages)
+        raise RuntimeError("network down")
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=failing_provider)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert calls
+    assert result["route"] == "rag_fallback"
+    assert "Cafeteria" in result["answer"]
+    assert result["sources"][0]["source"] == "rooms"
+
+
 def test_missing_secrets_file_does_not_crash(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.delenv("GROQ_MODEL", raising=False)
-    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+    _disable_real_groq(monkeypatch, tmp_path)
 
     config = load_groq_config()
 
@@ -210,39 +276,6 @@ def test_environment_variable_overrides_file_value(tmp_path, monkeypatch) -> Non
     assert config == {"api_key": "env-key", "model": "env-model"}
 
 
-def test_fake_llm_provider_is_called_when_provided(tmp_path) -> None:
-    calls: list[str] = []
-
-    def fake_provider(prompt: str) -> str:
-        calls.append(prompt)
-        return "LLM answer from fake provider."
-
-    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=fake_provider)
-
-    result = controller.answer_question("Where is cafeteria?")
-
-    assert calls
-    assert result["route"] == "llm"
-    assert result["answer"] == "LLM answer from fake provider."
-
-
-def test_api_failure_falls_back_safely(tmp_path) -> None:
-    calls: list[str] = []
-
-    def failing_provider(prompt: str) -> str:
-        calls.append(prompt)
-        raise RuntimeError("network down")
-
-    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=failing_provider)
-
-    result = controller.answer_question("Where is cafeteria?")
-
-    assert calls
-    assert result["route"] == "fallback"
-    assert "Cafeteria" in result["answer"]
-    assert result["sources"][0]["source_type"] == "rooms"
-
-
 def test_groq_provider_reads_environment(monkeypatch) -> None:
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     monkeypatch.delenv("GROQ_MODEL", raising=False)
@@ -253,14 +286,3 @@ def test_groq_provider_reads_environment(monkeypatch) -> None:
     assert provider.api_key == "test-key"
     assert provider.model == "openai/gpt-oss-120b"
 
-
-def test_build_prompt_includes_context_and_question(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    controller = PublicChatController(db_path=_db(tmp_path))
-    context = search_university_context("Where is cafeteria?", controller.db_path)
-
-    prompt = controller.build_prompt("Where is cafeteria?", context)
-
-    assert "ECU Smart Assistant" in prompt
-    assert "Cafeteria" in prompt
-    assert "Where is cafeteria?" in prompt

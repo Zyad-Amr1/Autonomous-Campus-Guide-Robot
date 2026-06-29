@@ -202,6 +202,7 @@ def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) 
 
     assert result["route"] == "rag_fallback"
     assert result["sources"][0]["id"] == "rooms:custom"
+    assert set(result["sources"][0]) == {"source", "title", "id"}
     assert "Student Center entrance" in result["answer"]
 
 
@@ -251,6 +252,7 @@ def test_answer_question_falls_back_safely_when_provider_fails(tmp_path) -> None
     assert result["route"] == "rag_fallback"
     assert "Cafeteria" in result["answer"]
     assert result["sources"][0]["source"] == "rooms"
+    assert set(result["sources"][0]) == {"source", "title", "id"}
 
 
 def test_missing_secrets_file_does_not_crash(tmp_path, monkeypatch) -> None:

@@ -74,6 +74,7 @@ class ChatScreen(QWidget):
         self._active_threads: list[QThread] = []
         self._active_workers: list[ChatAnswerWorker] = []
         self.message_labels: list[QLabel] = []
+        self.source_labels: list[QLabel] = []
         self._translations: dict[str, str] = {}
         self.setObjectName("chat_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -125,6 +126,11 @@ class ChatScreen(QWidget):
         self.chat_status_label.setObjectName("chat_status_label")
         page_layout.addWidget(self.chat_status_label)
 
+        self.chat_thinking_label = QLabel("")
+        self.chat_thinking_label.setObjectName("chat_thinking_label")
+        self.chat_thinking_label.setVisible(False)
+        page_layout.addWidget(self.chat_thinking_label)
+
         input_row = QHBoxLayout()
         input_row.setSpacing(10)
         self.chat_input = QLineEdit()
@@ -162,7 +168,10 @@ class ChatScreen(QWidget):
 
         self.add_user_message(question)
         self.chat_input.clear()
+        thinking_text = self._thinking_text(question)
         self.chat_status_label.setText("Searching university data...")
+        self.chat_thinking_label.setText(thinking_text)
+        self.chat_thinking_label.setVisible(True)
         self.chat_send_button.setEnabled(False)
         self._start_answer_worker(question)
 
@@ -189,15 +198,22 @@ class ChatScreen(QWidget):
     def _handle_answer_result(self, result: dict) -> None:
         """Render a completed bot answer."""
         self.add_bot_message(str(result["answer"]))
+        sources = result.get("sources") or []
+        if sources:
+            self.add_sources_message(sources)
         confidence = str(result.get("confidence", "low"))
         route = str(result.get("route", "fallback"))
         self.chat_status_label.setText(f"Answered from {route} ({confidence} confidence).")
+        self.chat_thinking_label.setVisible(False)
+        self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
 
     def _handle_answer_error(self, _error: str) -> None:
         """Render a safe message when answer generation fails unexpectedly."""
         self.add_bot_message("I could not answer safely right now. Please try another question.")
         self.chat_status_label.setText("Assistant error handled safely.")
+        self.chat_thinking_label.setVisible(False)
+        self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
 
     def closeEvent(self, event) -> None:  # noqa: N802
@@ -214,6 +230,28 @@ class ChatScreen(QWidget):
     def add_bot_message(self, text: str) -> QLabel:
         """Append a left-aligned bot bubble."""
         return self._add_message(text, sender="bot")
+
+    def add_sources_message(self, sources: list[dict]) -> QLabel:
+        """Append a compact source list under the latest bot answer."""
+        source_text = self._format_sources(sources)
+        sources_label = QLabel(source_text)
+        sources_label.setWordWrap(True)
+        sources_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        sources_label.setObjectName("chat_sources_area")
+        sources_label.setProperty("sender", "sources")
+        sources_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        sources_label.setMaximumWidth(640)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(sources_label)
+        row.addStretch()
+
+        insert_index = max(0, self.chat_messages_layout.count() - 1)
+        self.chat_messages_layout.insertLayout(insert_index, row)
+        self.source_labels.append(sources_label)
+        self._scroll_to_bottom()
+        return sources_label
 
     def _add_message(self, text: str, sender: str) -> QLabel:
         bubble = QLabel(text)
@@ -243,6 +281,40 @@ class ChatScreen(QWidget):
         QTimer.singleShot(0, lambda: self.chat_messages_area.verticalScrollBar().setValue(
             self.chat_messages_area.verticalScrollBar().maximum()
         ))
+
+    def _format_sources(self, sources: list[dict]) -> str:
+        """Format public source metadata without exposing noisy internals."""
+        lines = ["Sources:"]
+        for source in sources[:5]:
+            source_name = self._source_display_name(str(source.get("source", "")))
+            title = str(source.get("title", "")).strip()
+            if source_name and title:
+                lines.append(f"- {source_name}: {title}")
+            elif title:
+                lines.append(f"- {title}")
+            elif source_name:
+                lines.append(f"- {source_name}")
+        return "\n".join(lines)
+
+    def _source_display_name(self, source: str) -> str:
+        """Convert source keys into clean visitor-facing labels."""
+        labels = {
+            "faq": "FAQ",
+            "faculties": "Faculties",
+            "professors": "Professors",
+            "rooms": "Rooms",
+            "courses": "Courses",
+            "events": "Events",
+            "website": "Website",
+            "document": "Document",
+        }
+        return labels.get(source.strip().lower(), source.strip().title())
+
+    def _thinking_text(self, question: str) -> str:
+        """Return a brief loading state in the user's apparent language."""
+        if any("\u0600" <= character <= "\u06ff" for character in question):
+            return "\u062c\u0627\u0631\u064a \u0627\u0644\u062a\u0641\u0643\u064a\u0631..."
+        return "Thinking..."
 
     def update_language(self, translations: dict[str, str]) -> None:
         """Keep chat labels compatible with public language switching."""
@@ -277,7 +349,8 @@ class ChatScreen(QWidget):
             }}
 
             QLabel#chat_subtitle,
-            QLabel#chat_status_label {{
+            QLabel#chat_status_label,
+            QLabel#chat_thinking_label {{
                 color: {TEXT_MUTED};
                 {font(14, 650)}
             }}
@@ -308,6 +381,15 @@ class ChatScreen(QWidget):
                 border-radius: {px(10)};
                 padding: {px(12)} {px(14)};
                 {font(14, 700)}
+            }}
+
+            QLabel#chat_sources_area {{
+                background-color: {WHITE};
+                color: {TEXT_MUTED};
+                border: 1px solid {BORDER};
+                border-radius: {px(8)};
+                padding: {px(10)} {px(12)};
+                {font(12, 650)}
             }}
 
             QLineEdit#chat_input {{

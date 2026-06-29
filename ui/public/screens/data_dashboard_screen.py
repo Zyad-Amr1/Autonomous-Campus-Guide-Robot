@@ -34,6 +34,9 @@ from controllers.professor_csv_controller import (
     export_professors_to_csv,
     import_professors_from_csv,
 )
+from controllers.rag.knowledge_store import load_knowledge_chunks
+from controllers.rag.sync_external_sources import sync_external_sources_to_knowledge_base
+from controllers.rag.sync_knowledge_base import sync_database_to_knowledge_base
 from controllers.room_csv_controller import export_rooms_to_csv, import_rooms_from_csv
 from database.connection import DB_NAME
 from database.repositories.course_repository import (
@@ -249,6 +252,51 @@ class DataDashboardScreen(QWidget):
         self.data_save_edits_button.clicked.connect(self.save_edits)
         page_layout.addWidget(toolbar)
 
+        knowledge_panel = QFrame()
+        knowledge_panel.setObjectName("knowledge_base_panel")
+        knowledge_layout = QVBoxLayout(knowledge_panel)
+        knowledge_layout.setContentsMargins(16, 14, 16, 14)
+        knowledge_layout.setSpacing(10)
+
+        knowledge_header_row = QHBoxLayout()
+        knowledge_header_row.setSpacing(10)
+        self.kb_section_title = QLabel("Knowledge Base")
+        self.kb_section_title.setObjectName("kb_section_title")
+        self.kb_status_label = QLabel("Ready to sync chatbot knowledge.")
+        self.kb_status_label.setObjectName("kb_status_label")
+        self.kb_status_label.setWordWrap(True)
+        knowledge_header_row.addWidget(self.kb_section_title)
+        knowledge_header_row.addWidget(self.kb_status_label, stretch=1)
+        knowledge_layout.addLayout(knowledge_header_row)
+
+        knowledge_button_row = QHBoxLayout()
+        knowledge_button_row.setSpacing(10)
+        self.kb_sync_database_button = QPushButton("Sync Database Knowledge")
+        self.kb_sync_database_button.setObjectName("kb_sync_database_button")
+        self.kb_sync_external_button = QPushButton("Sync Website/Documents")
+        self.kb_sync_external_button.setObjectName("kb_sync_external_button")
+        self.kb_rebuild_all_button = QPushButton("Rebuild All Knowledge")
+        self.kb_rebuild_all_button.setObjectName("kb_rebuild_all_button")
+        self.kb_status_button = QPushButton("Knowledge Status")
+        self.kb_status_button.setObjectName("kb_status_button")
+
+        for button in (
+            self.kb_sync_database_button,
+            self.kb_sync_external_button,
+            self.kb_rebuild_all_button,
+            self.kb_status_button,
+        ):
+            button.setMinimumHeight(BUTTON_HEIGHT)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            knowledge_button_row.addWidget(button)
+
+        self.kb_sync_database_button.clicked.connect(self.sync_database_knowledge)
+        self.kb_sync_external_button.clicked.connect(self.sync_external_knowledge)
+        self.kb_rebuild_all_button.clicked.connect(self.rebuild_all_knowledge)
+        self.kb_status_button.clicked.connect(self.show_knowledge_status)
+        knowledge_layout.addLayout(knowledge_button_row)
+        page_layout.addWidget(knowledge_panel)
+
         self.data_table = QTableWidget()
         self.data_table.setObjectName("data_table")
         self.data_table.setAlternatingRowColors(True)
@@ -362,6 +410,70 @@ class DataDashboardScreen(QWidget):
             return
         self._set_status(f"Saved edits for {saved} row(s).")
         self.load_selected_dataset()
+
+    def sync_database_knowledge(self) -> None:
+        """Sync managed database records into the chatbot knowledge store."""
+        try:
+            result = sync_database_to_knowledge_base(self.db_path)
+        except Exception as error:
+            self._set_kb_status(f"Could not sync database knowledge: {error}")
+            return
+        chunks_created = int(result.get("chunks_created", 0))
+        self._set_kb_status(f"Synced {chunks_created} database knowledge chunk(s).")
+
+    def sync_external_knowledge(self) -> None:
+        """Sync website and document sources into the chatbot knowledge store."""
+        try:
+            result = sync_external_sources_to_knowledge_base(self.db_path)
+        except Exception as error:
+            self._set_kb_status(f"Could not sync website/documents: {error}")
+            return
+        website_chunks = int(result.get("website_chunks", 0))
+        document_chunks = int(result.get("document_chunks", 0))
+        errors = result.get("errors") or []
+        message = (
+            f"Synced {website_chunks} website chunk(s) and "
+            f"{document_chunks} document chunk(s)."
+        )
+        if errors:
+            message += f" Some sources need attention: {len(errors)} issue(s)."
+        self._set_kb_status(message)
+
+    def rebuild_all_knowledge(self) -> None:
+        """Rebuild database, website, and document knowledge in one action."""
+        try:
+            database_result = sync_database_to_knowledge_base(self.db_path)
+            external_result = sync_external_sources_to_knowledge_base(self.db_path)
+        except Exception as error:
+            self._set_kb_status(f"Could not rebuild all knowledge: {error}")
+            return
+        database_chunks = int(database_result.get("chunks_created", 0))
+        website_chunks = int(external_result.get("website_chunks", 0))
+        document_chunks = int(external_result.get("document_chunks", 0))
+        self._set_kb_status(
+            "Rebuilt knowledge base: "
+            f"{database_chunks} database, {website_chunks} website, "
+            f"{document_chunks} document chunk(s)."
+        )
+
+    def show_knowledge_status(self) -> None:
+        """Show persisted chunk counts grouped by source."""
+        try:
+            chunks = load_knowledge_chunks(self.db_path)
+        except Exception as error:
+            self._set_kb_status(f"Could not read knowledge status: {error}")
+            return
+        if not chunks:
+            self._set_kb_status("Knowledge base has no chunks yet.")
+            return
+        counts: dict[str, int] = {}
+        for chunk in chunks:
+            source = str(chunk.get("source") or "unknown")
+            counts[source] = counts.get(source, 0) + 1
+        grouped = ", ".join(
+            f"{source}: {count}" for source, count in sorted(counts.items())
+        )
+        self._set_kb_status(f"Knowledge chunks: {len(chunks)} total ({grouped}).")
 
     def _populate_table(self, dataset_name: str, rows: list[dict]) -> None:
         """Fill the table with clean row numbers and hidden record ids."""
@@ -489,6 +601,10 @@ class DataDashboardScreen(QWidget):
         """Update the dashboard status label."""
         self.data_status_label.setText(message)
 
+    def _set_kb_status(self, message: str) -> None:
+        """Update the knowledge base status label."""
+        self.kb_status_label.setText(message)
+
     def _apply_styles(self) -> None:
         """Apply the modern public dashboard style."""
         self.setStyleSheet(
@@ -505,12 +621,19 @@ class DataDashboardScreen(QWidget):
             }}
 
             QLabel#data_dashboard_subtitle,
-            QLabel#data_status_label {{
+            QLabel#data_status_label,
+            QLabel#kb_status_label {{
                 color: {TEXT_MUTED};
                 {font(15, 650)}
             }}
 
-            QFrame#data_toolbar {{
+            QLabel#kb_section_title {{
+                color: {CHARCOAL};
+                {font(18, 850)}
+            }}
+
+            QFrame#data_toolbar,
+            QFrame#knowledge_base_panel {{
                 background-color: {WHITE};
                 border: 1px solid {BORDER};
                 border-radius: {px(CARD_RADIUS)};

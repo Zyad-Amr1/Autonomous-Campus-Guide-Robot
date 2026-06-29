@@ -1,6 +1,7 @@
 """Headless tests for the public chat screen."""
 
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -18,9 +19,15 @@ class FakeChatController:
         return {
             "answer": f"Dynamic answer for: {question}",
             "confidence": "high",
-            "sources": [{"source_type": "faq", "title": "Test", "snippet": "Context"}],
+            "sources": [{"source": "faq", "title": "Test"}],
             "route": "database_context",
         }
+
+
+class SlowFakeChatController(FakeChatController):
+    def answer_question(self, question: str) -> dict:
+        time.sleep(0.1)
+        return super().answer_question(question)
 
 
 def _get_application() -> QApplication:
@@ -35,6 +42,7 @@ def _process_until(predicate, timeout_ms: int = 2000) -> None:
     deadline = timeout_ms
     while deadline > 0 and not predicate():
         application.processEvents()
+        time.sleep(0.01)
         deadline -= 10
     application.processEvents()
 
@@ -62,6 +70,7 @@ def test_chat_required_widgets_exist() -> None:
         assert screen.findChild(QPushButton, "chat_suggestion_3") is not None
         assert screen.findChild(QPushButton, "chat_suggestion_4") is not None
         assert screen.findChild(QLabel, "chat_status_label") is not None
+        assert screen.findChild(QLabel, "chat_thinking_label") is not None
     finally:
         screen.close()
 
@@ -82,6 +91,39 @@ def test_sending_message_adds_user_and_bot_messages() -> None:
         assert screen.message_labels[-2].property("sender") == "user"
         assert screen.message_labels[-1].property("sender") == "bot"
         assert "Dynamic answer" in screen.message_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_sources_are_displayed_when_returned() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=FakeChatController())
+    try:
+        assert application is not None
+        screen.chat_input.setText("Where is cafeteria?")
+        screen.send_message()
+        _process_until(lambda: len(screen.source_labels) == 1)
+        sources_area = screen.findChild(QLabel, "chat_sources_area")
+        assert sources_area is not None
+        assert "Sources:" in sources_area.text()
+        assert "FAQ: Test" in sources_area.text()
+    finally:
+        screen.close()
+
+
+def test_thinking_state_disables_and_reenables_send_button() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=SlowFakeChatController())
+    try:
+        assert application is not None
+        screen.chat_input.setText("Where is cafeteria?")
+        screen.send_message()
+        assert screen.chat_send_button.isEnabled() is False
+        assert screen.chat_thinking_label.isHidden() is False
+        assert screen.chat_thinking_label.text() == "Thinking..."
+        _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
+        assert screen.chat_send_button.isEnabled() is True
+        assert screen.chat_thinking_label.isHidden() is True
     finally:
         screen.close()
 

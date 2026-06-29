@@ -251,12 +251,9 @@ class PublicChatController:
         """Return public source metadata for retrieved chunks."""
         return [
             {
-                "source": chunk["source"],
-                "source_type": chunk["source"],
-                "id": chunk["id"],
-                "title": chunk["title"],
-                "snippet": chunk["content"],
-                "score": chunk.get("score", 0),
+                "source": str(chunk.get("source", "")),
+                "title": str(chunk.get("title", "")),
+                "id": str(chunk.get("id", "")),
             }
             for chunk in chunks
         ]

@@ -53,6 +53,8 @@ _SOURCE_ALIASES = {
     "courses": {"course", "courses", "schedule", "class", "classes", "\u062c\u062f\u0648\u0644", "\u062c\u062f\u0627\u0648\u0644", "\u0645\u0642\u0631\u0631", "\u0645\u0642\u0631\u0631\u0627\u062a"},
     "events": {"event", "events", "news", "activity", "activities", "\u0641\u0639\u0627\u0644\u064a\u0629", "\u0641\u0639\u0627\u0644\u064a\u0627\u062a", "\u0627\u062e\u0628\u0627\u0631", "\u0623\u062e\u0628\u0627\u0631"},
     "faq": {"faq", "question", "questions", "help", "\u0633\u0624\u0627\u0644", "\u0627\u0633\u0626\u0644\u0629", "\u0623\u0633\u0626\u0644\u0629"},
+    "website": {"website", "web", "page", "pages", "site", "admission", "admissions", "\u0645\u0648\u0642\u0639", "\u0642\u0628\u0648\u0644"},
+    "document": {"document", "documents", "file", "files", "pdf", "csv", "manual", "\u0645\u0644\u0641", "\u0645\u0633\u062a\u0646\u062f"},
 }
 _SOURCE_PRIORITY = {
     "faq": 0,
@@ -61,6 +63,8 @@ _SOURCE_PRIORITY = {
     "professors": 3,
     "courses": 4,
     "events": 5,
+    "website": 6,
+    "document": 7,
 }
 
 
@@ -109,6 +113,17 @@ def clear_generated_database_chunks(db_path: str | Path = DB_NAME) -> None:
             WHERE source IN ('faculties', 'professors', 'rooms', 'courses', 'events', 'faq')
             """
         )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def clear_external_chunks(db_path: str | Path = DB_NAME) -> None:
+    """Remove website and document chunks without touching database-generated chunks."""
+    init_knowledge_store(db_path)
+    connection = get_connection(db_path)
+    try:
+        connection.execute("DELETE FROM knowledge_chunks WHERE source IN ('website', 'document')")
         connection.commit()
     finally:
         connection.close()
@@ -257,4 +272,3 @@ def _tokens(text: str) -> set[str]:
         if token.startswith("\u0627\u0644") and len(token) > 2:
             tokens.add(token[2:])
     return tokens
-

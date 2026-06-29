@@ -255,14 +255,14 @@ class PublicChatController:
         return f"Based on ECU university data: {details}"
 
     def _confidence_for(self, context_items: list[dict[str, Any]], route: str) -> str:
-        if route == "rag_groq" and context_items:
-            return "high"
         if not context_items:
             return "low"
-        top_score = int(context_items[0].get("score", 0))
-        if top_score >= 18:
+        scores = [float(item.get("final_score", item.get("score", 0)) or 0) for item in context_items]
+        top_score = max(scores) if scores else 0
+        relevant_count = sum(1 for score in scores if score >= 22)
+        if top_score >= 55 and relevant_count >= 2:
             return "high"
-        if top_score >= 8:
+        if top_score >= 24 or relevant_count >= 1:
             return "medium"
         return "low"
 
@@ -313,7 +313,7 @@ class PublicChatController:
             {
                 "source": str(chunk.get("source", "")),
                 "title": str(chunk.get("title", "")),
-                "id": str(chunk.get("id", "")),
+                "score": round(float(chunk.get("final_score", chunk.get("score", 0)) or 0), 4),
             }
             for chunk in chunks
         ]

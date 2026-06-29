@@ -274,11 +274,81 @@ def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) 
     result = controller.answer_question("Where is cafeteria?")
 
     assert result["route"] == "rag_fallback"
-    assert result["sources"][0]["id"] == "rooms:custom"
-    assert set(result["sources"][0]) == {"source", "title", "id"}
+    assert result["sources"][0]["source"] == "rooms"
+    assert result["sources"][0]["title"] == "Cafeteria"
+    assert set(result["sources"][0]) == {"source", "title", "score"}
+    assert result["sources"][0]["score"] > 0
     assert "Student Center entrance" in result["answer"]
     assert result["intent"] == "room_location"
     assert result["language"] == "en"
+
+
+def test_answer_question_uses_retriever_pipeline(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    calls = []
+
+    def fake_retrieve(question, chunks, limit=8, intent=None):
+        calls.append({"question": question, "limit": limit, "intent": intent, "chunk_count": len(chunks)})
+        return [
+            {
+                "id": "faculties:test",
+                "source": "faculties",
+                "title": "Faculty of Engineering",
+                "content": "Engineering faculty context.",
+                "keywords": ["engineering"],
+                "final_score": 80,
+                "score": 80,
+            }
+        ]
+
+    monkeypatch.setattr(
+        "controllers.public_chat_controller.retrieve_relevant_chunks",
+        fake_retrieve,
+    )
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("Tell me about Faculty of Engineering")
+
+    assert calls
+    assert calls[0]["intent"] == "faculty_info"
+    assert result["route"] == "rag_fallback"
+    assert result["confidence"] == "medium"
+
+
+def test_confidence_high_for_strong_multiple_matches(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+
+    def fake_retrieve(_question, _chunks, limit=8, intent=None):
+        return [
+            {
+                "id": "faculties:test",
+                "source": "faculties",
+                "title": "Faculty of Engineering",
+                "content": "Engineering faculty context.",
+                "keywords": ["engineering"],
+                "final_score": 80,
+                "score": 80,
+            },
+            {
+                "id": "faq:test",
+                "source": "faq",
+                "title": "Engineering departments",
+                "content": "Engineering department context.",
+                "keywords": ["engineering", "departments"],
+                "final_score": 62,
+                "score": 62,
+            },
+        ]
+
+    monkeypatch.setattr(
+        "controllers.public_chat_controller.retrieve_relevant_chunks",
+        fake_retrieve,
+    )
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("Tell me about Faculty of Engineering")
+
+    assert result["confidence"] == "high"
 
 
 def test_empty_knowledge_chunks_falls_back_to_database_rows(tmp_path, monkeypatch) -> None:
@@ -291,6 +361,7 @@ def test_empty_knowledge_chunks_falls_back_to_database_rows(tmp_path, monkeypatc
 
     assert result["route"] == "rag_fallback"
     assert result["sources"][0]["source"] == "rooms"
+    assert "score" in result["sources"][0]
     assert "Cafeteria" in result["answer"]
 
 
@@ -369,7 +440,41 @@ def test_answer_question_falls_back_safely_when_provider_fails(tmp_path) -> None
     assert result["route"] == "rag_fallback"
     assert "Cafeteria" in result["answer"]
     assert result["sources"][0]["source"] == "rooms"
-    assert set(result["sources"][0]) == {"source", "title", "id"}
+    assert set(result["sources"][0]) == {"source", "title", "score"}
+
+
+def test_fake_llm_receives_limited_context(tmp_path) -> None:
+    calls: list[list[dict[str, str]]] = []
+    db_path = _db(tmp_path)
+    long_content = "Engineering details. " * 900
+    upsert_knowledge_chunks(
+        db_path,
+        [
+            {
+                "id": f"faculties:long:{index}",
+                "source": "faculties",
+                "title": f"Faculty of Engineering Detail {index}",
+                "content": long_content,
+                "keywords": ["engineering", "faculty"],
+                "language": "en",
+                "metadata": {},
+            }
+            for index in range(5)
+        ],
+    )
+
+    def fake_provider(messages: list[dict[str, str]]) -> str:
+        calls.append(messages)
+        return "Limited context answer."
+
+    controller = PublicChatController(db_path=db_path, llm_provider=fake_provider)
+
+    result = controller.answer_question("Tell me about Faculty of Engineering")
+
+    assert result["route"] == "rag_groq"
+    assert calls
+    assert len(calls[0][1]["content"]) < 8500
+    assert "[Source:" in calls[0][1]["content"]
 
 
 def test_missing_secrets_file_does_not_crash(tmp_path, monkeypatch) -> None:

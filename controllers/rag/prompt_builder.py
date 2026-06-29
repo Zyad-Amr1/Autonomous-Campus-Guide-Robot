@@ -7,6 +7,8 @@ from typing import Any
 from controllers.rag.query_analyzer import detect_language
 
 
+MAX_CONTEXT_CHARACTERS = 7000
+
 ENGLISH_INSUFFICIENT = (
     "I do not have enough information about that yet. You can ask about faculties, "
     "rooms, professors, courses, events, or university FAQs."
@@ -31,14 +33,7 @@ def build_rag_prompt(
     """Build chat messages for a grounded ECU Smart Assistant answer."""
     user_language = language or detect_language(question)
     insufficient = ARABIC_INSUFFICIENT if user_language == "ar" else ENGLISH_INSUFFICIENT
-    context = "\n\n".join(
-        (
-            f"Source: {chunk.get('source')}\n"
-            f"Title: {chunk.get('title')}\n"
-            f"Content: {chunk.get('content')}"
-        )
-        for chunk in chunks
-    ) or "No context was retrieved."
+    context = _format_context(chunks)
     conversation_context = _format_recent_messages(recent_messages or [])
     language_instruction = (
         "Answer in Arabic."
@@ -81,3 +76,32 @@ def _format_recent_messages(messages: list[dict[str, str]]) -> str:
         if content:
             lines.append(f"{role}: {content}")
     return "\n".join(lines) if lines else "No previous conversation."
+
+
+def _format_context(
+    chunks: list[dict[str, Any]],
+    max_characters: int = MAX_CONTEXT_CHARACTERS,
+) -> str:
+    """Format best-first retrieved chunks without sending unlimited text."""
+    if not chunks:
+        return "No context was retrieved."
+
+    sections: list[str] = []
+    used_characters = 0
+    for chunk in chunks:
+        source = str(chunk.get("source", "Unknown")).strip() or "Unknown"
+        title = str(chunk.get("title", "Untitled")).strip() or "Untitled"
+        content = str(chunk.get("content", "")).strip()
+        if not content:
+            continue
+        header = f"[Source: {source.title()} | Title: {title}]"
+        remaining = max_characters - used_characters - len(header) - 2
+        if remaining <= 0:
+            break
+        trimmed_content = content[:remaining].rstrip()
+        section = f"{header}\n{trimmed_content}"
+        sections.append(section)
+        used_characters += len(section) + 2
+        if used_characters >= max_characters:
+            break
+    return "\n\n".join(sections) if sections else "No context was retrieved."

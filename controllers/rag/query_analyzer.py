@@ -8,7 +8,7 @@ import re
 _WORD_RE = re.compile(r"[\w\u0600-\u06ff]+", re.UNICODE)
 _ARABIC_RE = re.compile(r"[\u0600-\u06ff]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
-_MOJIBAKE_ARABIC_RE = re.compile(r"[Ã˜Ã™]")
+_MOJIBAKE_ARABIC_RE = re.compile(r"[\u00d8\u00d9]")
 _ARABIC_DIACRITICS_RE = re.compile(r"[\u064b-\u065f\u0670]")
 
 _STOPWORDS = {
@@ -175,6 +175,23 @@ _INTENT_KEYWORDS = {
     },
 }
 
+_KEYWORD_EXPANSIONS = {
+    "\u0627\u0644\u0643\u0644\u064a\u0627\u062a": ("faculty", "faculties"),
+    "\u0643\u0644\u064a\u0627\u062a": ("faculty", "faculties"),
+    "\u0643\u0644\u064a\u0647": ("faculty", "faculties"),
+    "\u0627\u0644\u0647\u0646\u062f\u0633\u0647": ("engineering",),
+    "\u0647\u0646\u062f\u0633\u0647": ("engineering",),
+    "\u0627\u0642\u0633\u0627\u0645": ("department", "departments"),
+    "\u0623\u0642\u0633\u0627\u0645": ("department", "departments"),
+    "\u0642\u0633\u0645": ("department", "departments"),
+    "\u062f\u0643\u062a\u0648\u0631": ("professor",),
+    "\u062f\u0643\u0627\u062a\u0631\u0647": ("professor", "professors"),
+    "\u0627\u0633\u062a\u0627\u0630": ("professor",),
+    "\u0627\u0633\u0627\u062a\u0630\u0647": ("professor", "professors"),
+    "\u0642\u0627\u0639\u0647": ("room", "location"),
+    "\u0642\u0627\u0639\u0627\u062a": ("room", "rooms", "location"),
+}
+
 
 def detect_language(text: str) -> str:
     """Detect Arabic, English, or mixed Arabic/English text."""
@@ -219,9 +236,10 @@ def extract_keywords(text: str) -> list[str]:
             continue
         if token.startswith("\u0627\u0644") and len(token) > 3:
             token = token[2:]
-        if token not in seen:
-            seen.add(token)
-            keywords.append(token)
+        for expanded_token in (token, *_KEYWORD_EXPANSIONS.get(token, ())):
+            if expanded_token not in seen:
+                seen.add(expanded_token)
+                keywords.append(expanded_token)
     return keywords
 
 

@@ -8,6 +8,7 @@ from controllers.public_chat_controller import (
     ENGLISH_NO_CONTEXT,
     GroqChatProvider,
     PublicChatController,
+    load_groq_config,
 )
 from controllers.university_context_controller import search_university_context
 from database.init_db import initialize_database
@@ -142,6 +143,71 @@ def test_fallback_works_when_no_context_found(tmp_path, monkeypatch) -> None:
     assert result["confidence"] == "low"
     assert result["sources"] == []
     assert result["answer"] == ENGLISH_NO_CONTEXT
+
+
+def test_missing_secrets_file_does_not_crash(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+
+    config = load_groq_config()
+
+    assert config == {"api_key": "", "model": "openai/gpt-oss-120b"}
+
+
+def test_invalid_secrets_json_does_not_crash(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "api_keys.json").write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+
+    config = load_groq_config()
+
+    assert config == {"api_key": "", "model": "openai/gpt-oss-120b"}
+
+
+def test_config_loads_api_key_from_environment_first(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "env-key")
+    monkeypatch.setenv("GROQ_MODEL", "env-model")
+    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+
+    config = load_groq_config()
+
+    assert config == {"api_key": "env-key", "model": "env-model"}
+
+
+def test_config_loads_api_key_from_secrets_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "api_keys.json").write_text(
+        '{"GROQ_API_KEY": "file-key", "GROQ_MODEL": "file-model"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+
+    config = load_groq_config()
+
+    assert config == {"api_key": "file-key", "model": "file-model"}
+
+
+def test_environment_variable_overrides_file_value(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "env-key")
+    monkeypatch.setenv("GROQ_MODEL", "env-model")
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "api_keys.json").write_text(
+        '{"GROQ_API_KEY": "file-key", "GROQ_MODEL": "file-model"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+
+    config = load_groq_config()
+
+    assert config == {"api_key": "env-key", "model": "env-model"}
 
 
 def test_fake_llm_provider_is_called_when_provided(tmp_path) -> None:

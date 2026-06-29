@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,17 +21,59 @@ ARABIC_NO_CONTEXT = (
     "\u0644\u0627 \u0623\u0645\u0644\u0643 \u0645\u0639\u0644\u0648\u0645\u0627\u062a "
     "\u0643\u0627\u0641\u064a\u0629 \u0639\u0646 \u0647\u0630\u0627 \u062d\u0627\u0644\u064a\u0627."
 )
+GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
 def _is_arabic(text: str) -> bool:
     return any("\u0600" <= character <= "\u06ff" for character in text)
 
 
+def _project_root() -> Path:
+    """Return the repository root that contains the app's top-level folders."""
+    current_file = Path(__file__).resolve()
+    for folder in (current_file.parent, *current_file.parents):
+        if all((folder / name).exists() for name in ("apps", "controllers", "database", "ui")):
+            return folder
+    return current_file.parents[1]
+
+
+def load_groq_config() -> dict[str, str]:
+    """Load Groq API configuration from env first, then local secrets JSON."""
+    env_api_key = os.getenv("GROQ_API_KEY", "").strip()
+    env_model = os.getenv("GROQ_MODEL", "").strip()
+    if env_api_key:
+        return {
+            "api_key": env_api_key,
+            "model": env_model or GROQ_DEFAULT_MODEL,
+        }
+
+    config: dict[str, str] = {
+        "api_key": "",
+        "model": env_model or GROQ_DEFAULT_MODEL,
+    }
+    secrets_path = _project_root() / "secrets" / "api_keys.json"
+    try:
+        raw_config = json.loads(secrets_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return config
+
+    if not isinstance(raw_config, dict):
+        return config
+
+    file_api_key = str(raw_config.get("GROQ_API_KEY") or "").strip()
+    file_model = str(raw_config.get("GROQ_MODEL") or "").strip()
+    if file_api_key:
+        config["api_key"] = file_api_key
+    if file_model:
+        config["model"] = file_model
+    return config
+
+
 class GroqChatProvider:
     """OpenAI-compatible Groq chat completions provider."""
 
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    DEFAULT_MODEL = "openai/gpt-oss-120b"
+    DEFAULT_MODEL = GROQ_DEFAULT_MODEL
 
     def __init__(
         self,
@@ -44,12 +87,11 @@ class GroqChatProvider:
 
     @classmethod
     def from_environment(cls) -> "GroqChatProvider | None":
-        """Create a Groq provider only when GROQ_API_KEY is available."""
-        api_key = os.getenv("GROQ_API_KEY", "").strip()
-        if not api_key:
+        """Create a Groq provider from env or local secrets when a key exists."""
+        config = load_groq_config()
+        if not config["api_key"]:
             return None
-        model = os.getenv("GROQ_MODEL", cls.DEFAULT_MODEL).strip() or cls.DEFAULT_MODEL
-        return cls(api_key=api_key, model=model)
+        return cls(api_key=config["api_key"], model=config["model"])
 
     def __call__(self, prompt: str) -> str:
         """Call Groq's OpenAI-compatible chat completions endpoint."""

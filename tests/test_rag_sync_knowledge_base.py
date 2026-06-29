@@ -42,6 +42,43 @@ def _db(tmp_path):
     return db_path
 
 
+def _professor_only_db(tmp_path):
+    db_path = tmp_path / "professor_only.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE professors (
+                id INTEGER PRIMARY KEY,
+                full_name TEXT,
+                title TEXT,
+                email TEXT,
+                phone TEXT,
+                office_hours TEXT,
+                bio TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO professors (full_name, title, email, phone, office_hours, bio)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Dr. Ahmed Samir",
+                "Associate Professor",
+                "ahmed.samir@ecu.edu.eg",
+                "123",
+                "Monday 10:00-12:00",
+                "Software engineering staff member.",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return db_path
+
+
 def test_fake_sqlite_database_creates_chunks(tmp_path) -> None:
     db_path = _db(tmp_path)
 
@@ -52,6 +89,34 @@ def test_fake_sqlite_database_creates_chunks(tmp_path) -> None:
     assert summary["sources"]["faculties"] == 1
     assert summary["sources"]["rooms"] == 1
     assert summary["sources"]["faq"] == 1
+
+
+def test_sync_creates_professor_chunks_with_missing_related_tables(tmp_path) -> None:
+    db_path = _professor_only_db(tmp_path)
+
+    summary = sync_database_to_knowledge_base(db_path)
+
+    chunks = load_knowledge_chunks(db_path)
+    assert summary["sources"]["professors"] == 1
+    assert chunks[0]["source"] == "professors"
+    assert "Dr. Ahmed Samir" in chunks[0]["title"]
+
+
+def test_sync_creates_faculty_chunks(tmp_path) -> None:
+    db_path = _db(tmp_path)
+
+    summary = sync_database_to_knowledge_base(db_path)
+
+    assert summary["sources"]["faculties"] == 1
+
+
+def test_sync_empty_missing_tables_does_not_crash(tmp_path) -> None:
+    db_path = tmp_path / "empty.db"
+    sqlite3.connect(db_path).close()
+
+    summary = sync_database_to_knowledge_base(db_path)
+
+    assert summary == {"chunks_created": 0, "sources": {}}
 
 
 def test_sync_returns_chunk_count(tmp_path) -> None:

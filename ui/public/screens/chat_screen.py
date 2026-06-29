@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from controllers.public_chat_controller import PublicChatController
+from controllers.public_chat_controller import ENGLISH_NO_CONTEXT
 from ui.public.theme import (
     BORDER,
     CHARCOAL,
@@ -280,13 +281,15 @@ class ChatScreen(QWidget):
         self._remove_thinking_bubble()
         confidence = str(result.get("confidence", "low"))
         route = str(result.get("route", "fallback"))
-        self.chat_status_label.setText(f"Answered from {route} ({confidence} confidence).")
+        sources = [] if route == "no_context" else list(result.get("sources") or [])
+        debug = dict(result.get("debug") or {})
+        self.chat_status_label.setText(self._status_text(route, confidence, sources, debug))
         self.chat_thinking_label.setVisible(False)
         self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
         self.chat_retry_button.setEnabled(bool(self._last_user_question))
-        sources = [] if route == "no_context" else list(result.get("sources") or [])
-        self._start_typing_answer(str(result.get("answer", "")), sources, route)
+        answer = str(result.get("answer") or "").strip() or ENGLISH_NO_CONTEXT
+        self._start_typing_answer(answer, sources, route)
 
     def _handle_answer_error(self, _error: str, request_id: int) -> None:
         """Render a safe message when answer generation fails unexpectedly."""
@@ -406,6 +409,20 @@ class ChatScreen(QWidget):
         if numeric_score <= 0:
             return ""
         return f"score {numeric_score:.0f}"
+
+    def _status_text(
+        self,
+        route: str,
+        confidence: str,
+        sources: list[dict],
+        debug: dict,
+    ) -> str:
+        """Build a compact visitor-safe generation status line."""
+        if debug.get("auto_synced_database"):
+            return f"Knowledge synced automatically | {int(debug.get('chunk_count_after') or 0)} chunks"
+        if route == "no_context":
+            return f"No context found | {int(debug.get('chunk_count_after') or 0)} chunks"
+        return f"Answered from {route} | {len(sources)} sources | {confidence} confidence"
 
     def _thinking_text(self, question: str) -> str:
         """Return a brief loading state in the user's apparent language."""

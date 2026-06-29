@@ -25,6 +25,11 @@ class FakeChatController:
             "confidence": "high",
             "sources": self.sources,
             "route": self.route,
+            "debug": {
+                "chunk_count_after": 4,
+                "auto_synced_database": False,
+                "source_counts": {"faq": 1},
+            },
         }
 
     def clear_memory(self) -> None:
@@ -134,6 +139,77 @@ def test_no_sources_are_displayed_for_no_context() -> None:
         screen.send_message()
         _process_until(lambda: "Dynamic answer" in screen.message_labels[-1].text())
         assert screen.source_labels == []
+    finally:
+        screen.close()
+
+
+def test_no_context_answer_is_displayed_as_assistant_bubble() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+    controller.route = "no_context"
+    controller.sources = []
+
+    def no_context_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "I do not have enough information about that yet. Please sync or add university data in the Data section.",
+            "confidence": "low",
+            "sources": [],
+            "route": "no_context",
+            "debug": {"chunk_count_after": 0, "auto_synced_database": False},
+        }
+
+    controller.answer_question = no_context_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Unknown topic")
+        screen.send_message()
+        _process_until(lambda: "I do not have enough information" in screen.message_labels[-1].text())
+        assert screen.message_labels[-2].property("sender") == "user"
+        assert screen.message_labels[-1].property("sender") == "bot"
+        assert screen.message_labels[-1].text() != "?"
+        assert screen.source_labels == []
+        assert screen.chat_status_label.text() == "No context found | 0 chunks"
+    finally:
+        screen.close()
+
+
+def test_status_label_shows_route_and_source_count() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=FakeChatController())
+    try:
+        assert application is not None
+        screen.chat_input.setText("Where is cafeteria?")
+        screen.send_message()
+        _process_until(lambda: "Answered from database_context" in screen.chat_status_label.text())
+        assert screen.chat_status_label.text() == "Answered from database_context | 1 sources | high confidence"
+    finally:
+        screen.close()
+
+
+def test_status_label_shows_auto_sync_chunk_count() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def auto_sync_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Synced answer",
+            "confidence": "medium",
+            "sources": [{"source": "faq", "title": "One", "score": 44}],
+            "route": "rag_fallback",
+            "debug": {"chunk_count_after": 25, "auto_synced_database": True},
+        }
+
+    controller.answer_question = auto_sync_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Tell me about faculties")
+        screen.send_message()
+        _process_until(lambda: screen.chat_status_label.text().startswith("Knowledge synced automatically"))
+        assert screen.chat_status_label.text() == "Knowledge synced automatically | 25 chunks"
     finally:
         screen.close()
 

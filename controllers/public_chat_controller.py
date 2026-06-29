@@ -12,6 +12,9 @@ import requests
 from controllers.rag.conversation_memory import ConversationMemory
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
 from controllers.rag.knowledge_store import (
+    get_chunk_count,
+    get_source_counts,
+    has_knowledge_chunks,
     init_knowledge_store,
     is_knowledge_dirty,
     load_knowledge_chunks,
@@ -25,14 +28,25 @@ from controllers.rag.prompt_builder import (
 )
 from controllers.rag.query_analyzer import detect_intent, extract_keywords
 from controllers.rag.retriever import retrieve_relevant_chunks
+from controllers.rag.sync_knowledge_base import sync_database_to_knowledge_base
 from database.connection import DB_NAME
 from database.repositories.log_repository import create_log
 
 
 LLMProvider = Callable[[list[dict[str, str]]], str | dict[str, Any]]
 
-ENGLISH_NO_CONTEXT = ENGLISH_INSUFFICIENT
-ARABIC_NO_CONTEXT = ARABIC_INSUFFICIENT
+ENGLISH_NO_CONTEXT = (
+    "I do not have enough information about that yet. "
+    "Please sync or add university data in the Data section."
+)
+ARABIC_NO_CONTEXT = (
+    "\u0644\u0627 \u0623\u0645\u0644\u0643 \u0645\u0639\u0644\u0648\u0645\u0627\u062a "
+    "\u0643\u0627\u0641\u064a\u0629 \u0639\u0646 \u0647\u0630\u0627 \u0627\u0644\u0633\u0624\u0627\u0644 "
+    "\u062d\u0627\u0644\u064a\u064b\u0627. \u0645\u0646 \u0641\u0636\u0644\u0643 "
+    "\u0623\u0636\u0641 \u0623\u0648 \u062d\u062f\u0651\u062b \u0628\u064a\u0627\u0646\u0627\u062a "
+    "\u0627\u0644\u062c\u0627\u0645\u0639\u0629 \u0645\u0646 \u0642\u0633\u0645 "
+    "\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a."
+)
 GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
@@ -145,6 +159,10 @@ class PublicChatController:
         language = detect_language(cleaned_question)
         intent = detect_intent(cleaned_question)
         self._last_knowledge_dirty = self._safe_is_knowledge_dirty()
+        self._last_chunk_count_before = self._safe_chunk_count()
+        self._last_chunk_count_after = self._last_chunk_count_before
+        self._last_source_counts = self._safe_source_counts()
+        self._last_auto_synced_database = False
         if not cleaned_question:
             return {
                 "answer": ENGLISH_NO_CONTEXT,
@@ -157,6 +175,7 @@ class PublicChatController:
             }
 
         recent_messages = self.conversation_memory.get_recent_messages()
+        self._ensure_database_knowledge_if_empty()
         retrieval_query = self._expanded_retrieval_query(cleaned_question, recent_messages)
         retrieval_intent = intent if intent != "unknown" else detect_intent(retrieval_query)
         retrieved_chunks = self._retrieve_chunks(retrieval_query, retrieval_intent)
@@ -346,6 +365,10 @@ class PublicChatController:
             "used_groq": used_groq,
             "context_chars": context_character_count(chunks),
             "knowledge_dirty": bool(getattr(self, "_last_knowledge_dirty", False)),
+            "chunk_count_before": int(getattr(self, "_last_chunk_count_before", 0)),
+            "chunk_count_after": int(getattr(self, "_last_chunk_count_after", 0)),
+            "source_counts": dict(getattr(self, "_last_source_counts", {})),
+            "auto_synced_database": bool(getattr(self, "_last_auto_synced_database", False)),
         }
 
     def _safe_is_knowledge_dirty(self) -> bool:
@@ -354,6 +377,33 @@ class PublicChatController:
             return is_knowledge_dirty(self.db_path)
         except Exception:
             return False
+
+    def _safe_chunk_count(self) -> int:
+        try:
+            return get_chunk_count(self.db_path)
+        except Exception:
+            return 0
+
+    def _safe_source_counts(self) -> dict[str, int]:
+        try:
+            return get_source_counts(self.db_path)
+        except Exception:
+            return {}
+
+    def _ensure_database_knowledge_if_empty(self) -> None:
+        """Bootstrap persistent database chunks once when the RAG store is empty."""
+        try:
+            if has_knowledge_chunks(self.db_path):
+                self._last_chunk_count_after = self._safe_chunk_count()
+                self._last_source_counts = self._safe_source_counts()
+                return
+            sync_database_to_knowledge_base(self.db_path)
+            self._last_auto_synced_database = True
+        except Exception:
+            self._last_auto_synced_database = False
+        finally:
+            self._last_chunk_count_after = self._safe_chunk_count()
+            self._last_source_counts = self._safe_source_counts()
 
     def _answer_ignores_context(self, answer: str, chunks: list[dict[str, Any]]) -> bool:
         """Detect provider answers that appear unrelated to retrieved evidence."""

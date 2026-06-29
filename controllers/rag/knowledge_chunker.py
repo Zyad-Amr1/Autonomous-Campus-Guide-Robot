@@ -13,6 +13,35 @@ from database.connection import DB_NAME, get_connection
 _ARABIC_RE = re.compile(r"[\u0600-\u06ff]")
 _ENGLISH_RE = re.compile(r"[A-Za-z]")
 _WORD_RE = re.compile(r"[\w\u0600-\u06ff]+", re.UNICODE)
+_SOURCE_KEYWORDS = {
+    "faculties": (
+        "faculty",
+        "faculties",
+        "college",
+        "colleges",
+        "\u0627\u0644\u0643\u0644\u064a\u0627\u062a",
+        "\u0643\u0644\u064a\u0627\u062a",
+    ),
+    "professors": (
+        "professor",
+        "professors",
+        "staff",
+        "doctors",
+        "faculty members",
+        "\u0627\u0639\u0636\u0627\u0621 \u0647\u064a\u0626\u0629 \u0627\u0644\u062a\u062f\u0631\u064a\u0633",
+        "\u062f\u0643\u0627\u062a\u0631\u0629",
+        "\u0627\u0644\u062f\u0643\u0627\u062a\u0631\u0629",
+    ),
+    "rooms": (
+        "room",
+        "rooms",
+        "location",
+        "cafeteria",
+        "hall",
+        "\u0627\u0644\u0642\u0627\u0639\u0627\u062a",
+        "\u0643\u0627\u0641\u064a\u062a\u0631\u064a\u0627",
+    ),
+}
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -65,7 +94,7 @@ def _keywords(*parts: Any) -> list[str]:
 
 
 def _chunk(source: str, row_id: Any, title: str, content: str, *keyword_parts: Any) -> dict[str, Any]:
-    full_text = _clean_parts(title, content, *keyword_parts)
+    full_text = _clean_parts(source, title, content, *_SOURCE_KEYWORDS.get(source, ()), *keyword_parts)
     return {
         "id": f"{source}:{row_id}",
         "source": source,
@@ -80,6 +109,85 @@ def build_knowledge_chunks(db_path: str | Path = DB_NAME) -> list[dict[str, Any]
     """Read SQLite university data and return RAG knowledge chunks."""
     connection = get_connection(db_path)
     try:
+        table_flags = {
+            table_name: _table_exists(connection, table_name)
+            for table_name in ("faculties", "rooms", "professors", "courses", "events", "faq")
+        }
+        professors_query = """
+            SELECT
+                professors.id,
+                professors.full_name,
+                professors.title,
+                professors.email,
+                professors.phone,
+                professors.office_hours,
+                professors.bio,
+                faculties.name AS faculty_name,
+                rooms.room_name AS office_room_name,
+                rooms.room_number AS office_room_number,
+                rooms.building AS office_building
+            FROM professors
+            LEFT JOIN faculties ON professors.faculty_id = faculties.id
+            LEFT JOIN rooms ON professors.office_room_id = rooms.id
+            ORDER BY professors.full_name
+        """
+        if not (table_flags["faculties"] and table_flags["rooms"]):
+            professors_query = """
+                SELECT
+                    id,
+                    full_name,
+                    title,
+                    email,
+                    phone,
+                    office_hours,
+                    bio,
+                    NULL AS faculty_name,
+                    NULL AS office_room_name,
+                    NULL AS office_room_number,
+                    NULL AS office_building
+                FROM professors
+                ORDER BY full_name
+            """
+
+        courses_query = """
+            SELECT
+                courses.id,
+                courses.course_code,
+                courses.course_name,
+                courses.schedule_day,
+                courses.start_time,
+                courses.end_time,
+                courses.semester,
+                faculties.name AS faculty_name,
+                professors.full_name AS professor_name,
+                rooms.room_name AS room_name,
+                rooms.room_number AS room_number,
+                rooms.building AS building
+            FROM courses
+            LEFT JOIN faculties ON courses.faculty_id = faculties.id
+            LEFT JOIN professors ON courses.professor_id = professors.id
+            LEFT JOIN rooms ON courses.room_id = rooms.id
+            ORDER BY courses.course_code, courses.schedule_day, courses.start_time
+        """
+        if not (table_flags["faculties"] and table_flags["professors"] and table_flags["rooms"]):
+            courses_query = """
+                SELECT
+                    id,
+                    course_code,
+                    course_name,
+                    schedule_day,
+                    start_time,
+                    end_time,
+                    semester,
+                    NULL AS faculty_name,
+                    NULL AS professor_name,
+                    NULL AS room_name,
+                    NULL AS room_number,
+                    NULL AS building
+                FROM courses
+                ORDER BY course_code, schedule_day, start_time
+            """
+
         rows_by_source = {
             "faculties": _safe_rows(
                 connection,
@@ -102,48 +210,12 @@ def build_knowledge_chunks(db_path: str | Path = DB_NAME) -> list[dict[str, Any]
             "professors": _safe_rows(
                 connection,
                 "professors",
-                """
-                SELECT
-                    professors.id,
-                    professors.full_name,
-                    professors.title,
-                    professors.email,
-                    professors.phone,
-                    professors.office_hours,
-                    professors.bio,
-                    faculties.name AS faculty_name,
-                    rooms.room_name AS office_room_name,
-                    rooms.room_number AS office_room_number,
-                    rooms.building AS office_building
-                FROM professors
-                LEFT JOIN faculties ON professors.faculty_id = faculties.id
-                LEFT JOIN rooms ON professors.office_room_id = rooms.id
-                ORDER BY professors.full_name
-                """,
+                professors_query,
             ),
             "courses": _safe_rows(
                 connection,
                 "courses",
-                """
-                SELECT
-                    courses.id,
-                    courses.course_code,
-                    courses.course_name,
-                    courses.schedule_day,
-                    courses.start_time,
-                    courses.end_time,
-                    courses.semester,
-                    faculties.name AS faculty_name,
-                    professors.full_name AS professor_name,
-                    rooms.room_name AS room_name,
-                    rooms.room_number AS room_number,
-                    rooms.building AS building
-                FROM courses
-                LEFT JOIN faculties ON courses.faculty_id = faculties.id
-                LEFT JOIN professors ON courses.professor_id = professors.id
-                LEFT JOIN rooms ON courses.room_id = rooms.id
-                ORDER BY courses.course_code, courses.schedule_day, courses.start_time
-                """,
+                courses_query,
             ),
             "events": _safe_rows(
                 connection,
@@ -232,4 +304,3 @@ def build_knowledge_chunks(db_path: str | Path = DB_NAME) -> list[dict[str, Any]
         chunks.append(_chunk("faq", row.get("id"), title, content, row.get("keywords"), row.get("category")))
 
     return chunks
-

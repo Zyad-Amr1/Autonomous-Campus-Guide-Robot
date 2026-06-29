@@ -230,6 +230,46 @@ def search_knowledge_chunks(
     return results[: max(1, int(limit))]
 
 
+def get_chunk_count(db_path: str | Path = DB_NAME) -> int:
+    """Return stored chunk count, or zero before the chunk table exists."""
+    connection = get_connection(db_path)
+    try:
+        if not _sqlite_table_exists(connection, "knowledge_chunks"):
+            return 0
+        row = connection.execute("SELECT COUNT(*) AS chunk_count FROM knowledge_chunks").fetchone()
+    except Exception:
+        return 0
+    finally:
+        connection.close()
+    return int(row["chunk_count"] if row is not None else 0)
+
+
+def get_source_counts(db_path: str | Path = DB_NAME) -> dict[str, int]:
+    """Return chunk counts grouped by public source key."""
+    connection = get_connection(db_path)
+    try:
+        if not _sqlite_table_exists(connection, "knowledge_chunks"):
+            return {}
+        rows = connection.execute(
+            """
+            SELECT COALESCE(NULLIF(source, ''), 'unknown') AS source, COUNT(*) AS chunk_count
+            FROM knowledge_chunks
+            GROUP BY COALESCE(NULLIF(source, ''), 'unknown')
+            ORDER BY source
+            """
+        ).fetchall()
+    except Exception:
+        return {}
+    finally:
+        connection.close()
+    return {str(row["source"]): int(row["chunk_count"]) for row in rows}
+
+
+def has_knowledge_chunks(db_path: str | Path = DB_NAME) -> bool:
+    """Return whether any persistent knowledge chunks are available."""
+    return get_chunk_count(db_path) > 0
+
+
 def set_sync_status(db_path: str | Path, key: str, value: str) -> None:
     """Persist one RAG sync status value without disturbing chunk data."""
     if not key:
@@ -291,17 +331,13 @@ def is_knowledge_dirty(db_path: str | Path) -> bool:
 
 def get_knowledge_status_summary(db_path: str | Path = DB_NAME) -> dict[str, Any]:
     """Return chunk and freshness status suitable for UI/debug display."""
-    chunks = load_knowledge_chunks(db_path)
-    sources: dict[str, int] = {}
-    for chunk in chunks:
-        source = str(chunk.get("source") or "unknown")
-        sources[source] = sources.get(source, 0) + 1
+    sources = get_source_counts(db_path)
     return {
         "dirty": is_knowledge_dirty(db_path),
         "dirty_reason": get_sync_status(db_path, "dirty_reason", "") or "",
         "last_database_sync": get_sync_status(db_path, "last_database_sync", "") or "",
         "last_external_sync": get_sync_status(db_path, "last_external_sync", "") or "",
-        "chunk_count": len(chunks),
+        "chunk_count": sum(sources.values()),
         "sources": sources,
     }
 
@@ -357,3 +393,11 @@ def _tokens(text: str) -> set[str]:
         if token.startswith("\u0627\u0644") and len(token) > 2:
             tokens.add(token[2:])
     return tokens
+
+
+def _sqlite_table_exists(connection, table_name: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None

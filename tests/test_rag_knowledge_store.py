@@ -6,8 +6,11 @@ import sqlite3
 
 from controllers.rag.knowledge_store import (
     clear_knowledge_dirty,
+    get_chunk_count,
     get_knowledge_status_summary,
+    get_source_counts,
     get_sync_status,
+    has_knowledge_chunks,
     init_knowledge_store,
     is_knowledge_dirty,
     load_knowledge_chunks,
@@ -58,6 +61,23 @@ def test_init_creates_sync_status_table(tmp_path) -> None:
     finally:
         connection.close()
     assert row is not None
+
+
+def test_chunk_count_returns_zero_if_table_missing(tmp_path) -> None:
+    assert get_chunk_count(tmp_path / "missing.db") == 0
+
+
+def test_source_counts_and_has_chunks_work(tmp_path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    faculty_chunk = _chunk("faculties:1", "Engineering")
+    faculty_chunk["source"] = "faculties"
+
+    assert has_knowledge_chunks(db_path) is False
+    upsert_knowledge_chunks(db_path, [_chunk(), faculty_chunk])
+
+    assert get_chunk_count(db_path) == 2
+    assert get_source_counts(db_path) == {"faculties": 1, "rooms": 1}
+    assert has_knowledge_chunks(db_path) is True
 
 
 def test_upsert_inserts_chunks(tmp_path) -> None:

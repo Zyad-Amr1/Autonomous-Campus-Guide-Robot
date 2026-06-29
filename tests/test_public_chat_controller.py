@@ -224,7 +224,7 @@ def test_arabic_question_produces_arabic_instruction(tmp_path) -> None:
 
     assert detect_language("ما هي كليات الجامعة؟") == "ar"
     assert "Answer in Arabic." in messages[0]["content"]
-    assert ARABIC_NO_CONTEXT in messages[0]["content"]
+    assert "Use only the retrieved university context" in messages[0]["content"]
 
 
 def test_answer_question_returns_no_context_when_nothing_found(tmp_path, monkeypatch) -> None:
@@ -241,6 +241,9 @@ def test_answer_question_returns_no_context_when_nothing_found(tmp_path, monkeyp
     assert result["language"] == "en"
     assert result["debug"]["retrieved_count"] == 0
     assert result["debug"]["used_groq"] is False
+    assert result["debug"]["chunk_count_before"] == 0
+    assert result["debug"]["chunk_count_after"] >= 1
+    assert result["debug"]["source_counts"]
 
 
 def test_no_context_does_not_call_fake_llm(tmp_path) -> None:
@@ -257,6 +260,80 @@ def test_no_context_does_not_call_fake_llm(tmp_path) -> None:
     assert result["route"] == "no_context"
     assert calls == []
     assert result["debug"]["used_groq"] is False
+
+
+def test_empty_knowledge_store_auto_syncs_database(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    calls = []
+
+    def fake_sync(db_path):
+        calls.append(db_path)
+        return {"chunks_created": 0, "sources": {}}
+
+    monkeypatch.setattr("controllers.public_chat_controller.sync_database_to_knowledge_base", fake_sync)
+    db_path = _db(tmp_path)
+    init_knowledge_store(db_path)
+    controller = PublicChatController(db_path=db_path)
+
+    result = controller.answer_question("Tell me about parking permits on Mars")
+
+    assert calls == [db_path]
+    assert result["debug"]["auto_synced_database"] is True
+    assert result["debug"]["chunk_count_before"] == 0
+
+
+def test_professor_question_retrieves_professor_chunk(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("who are the professors?")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "professors"
+    assert "Dr. Mona Hassan" in result["answer"]
+
+
+def test_staff_members_question_retrieves_professor_chunk(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("staff members")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "professors"
+
+
+def test_faculty_question_retrieves_faculty_chunk(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("what faculties are available")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "faculties"
+    assert "Engineering" in result["answer"]
+
+
+def test_cafeteria_question_retrieves_room_chunk(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("where is the cafeteria?")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "rooms"
+    assert "Cafeteria" in result["answer"]
+
+
+def test_no_context_answer_is_clear_not_question_mark(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("Tell me about parking permits on Mars")
+
+    assert result["route"] == "no_context"
+    assert result["answer"] == ENGLISH_NO_CONTEXT
+    assert result["answer"] != "?"
 
 
 def test_answer_question_includes_knowledge_dirty_debug_flag(tmp_path) -> None:

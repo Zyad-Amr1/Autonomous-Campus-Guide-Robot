@@ -439,6 +439,63 @@ def test_professor_question_retrieves_professor_chunk(tmp_path, monkeypatch) -> 
     assert "Dr. Mona Hassan" in result["answer"]
 
 
+def test_professor_question_prioritizes_professors_over_faq(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    db_path = _db(tmp_path)
+    upsert_knowledge_chunks(
+        db_path,
+        [
+            {
+                "id": "faq:professor-office",
+                "source": "faq",
+                "title": "How can I find a professor office?",
+                "content": "Use the Find a Professor screen to search by professor name.",
+                "keywords": ["professor", "office"],
+                "language": "en",
+                "metadata": {},
+            },
+            {
+                "id": "professors:marwa",
+                "source": "professors",
+                "title": "Ass. Prof. Dr. Marwa Taher",
+                "content": (
+                    "Assistant Professor Faculty: Faculty of Physical Therapy "
+                    "Office: Gait Analysis Lab R101 Email: marwa.taher@ecu.edu.eg "
+                    "Office hours: Tuesday 13:00-15:00"
+                ),
+                "keywords": ["professor", "staff", "physical", "therapy"],
+                "language": "en",
+                "metadata": {},
+            },
+        ],
+    )
+    controller = PublicChatController(db_path=db_path)
+
+    result = controller.answer_question("Who are the professors?")
+
+    assert result["route"] == "rag_fallback"
+    assert result["sources"][0]["source"] == "professors"
+    assert result["sources"][0]["title"] == "Ass. Prof. Dr. Marwa Taher"
+    assert result["answer"].startswith("Based on ECU university data, here are some available professors:")
+
+
+def test_professor_fallback_answer_is_formatted_as_list(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("who are the professors?")
+    answer = result["answer"]
+
+    assert "Based on ECU university data, here are some available professors:" in answer
+    assert "\n- Dr. Mona Hassan" in answer
+    assert "\n  Faculty: Engineering" in answer
+    assert "\n  Office: Cafeteria C-01 Student Center" in answer
+    assert "\n  Office hours: Sunday 10:00-12:00" in answer
+    assert "\n  Email: mona.hassan@ecu.edu.eg" in answer
+    assert "Robotics researcher" not in answer
+    assert len(answer) < 900
+
+
 def test_staff_members_question_retrieves_professor_chunk(tmp_path, monkeypatch) -> None:
     _disable_real_groq(monkeypatch, tmp_path)
     controller = PublicChatController(db_path=_db(tmp_path))
@@ -458,6 +515,11 @@ def test_faculty_question_retrieves_faculty_chunk(tmp_path, monkeypatch) -> None
     assert result["route"] != "no_context"
     assert result["sources"][0]["source"] == "faculties"
     assert "Engineering" in result["answer"]
+    assert "Based on ECU university data, here are some available faculties:" in result["answer"]
+    assert "\n- Engineering" in result["answer"]
+    assert "\n  Description: Engineering and robotics programs" in result["answer"]
+    assert "\n  Building: Building A" in result["answer"]
+    assert "\n  Dean: Dr. Adel" in result["answer"]
 
 
 def test_cafeteria_question_retrieves_room_chunk(tmp_path, monkeypatch) -> None:
@@ -469,6 +531,12 @@ def test_cafeteria_question_retrieves_room_chunk(tmp_path, monkeypatch) -> None:
     assert result["route"] != "no_context"
     assert result["sources"][0]["source"] == "rooms"
     assert "Cafeteria" in result["answer"]
+    assert "Based on ECU university data, here are the relevant locations:" in result["answer"]
+    assert "\n- Cafeteria" in result["answer"]
+    assert "\n  Building: Student Center" in result["answer"]
+    assert "\n  Floor: 1" in result["answer"]
+    assert "\n  Category: Service" in result["answer"]
+    assert "\n  Description: Food court and student break area" in result["answer"]
 
 
 def test_no_context_answer_is_clear_not_question_mark(tmp_path, monkeypatch) -> None:
@@ -518,6 +586,19 @@ def test_answer_question_returns_arabic_no_context(tmp_path, monkeypatch) -> Non
     assert result["language"] == "ar"
 
 
+def test_arabic_professor_fallback_uses_arabic_intro(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("من هم الدكاترة؟")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "professors"
+    assert result["answer"].startswith("بناءً على بيانات الجامعة")
+    assert "Dr. Mona Hassan" in result["answer"]
+    assert "الكلية:" in result["answer"]
+
+
 def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) -> None:
     _disable_real_groq(monkeypatch, tmp_path)
     db_path = _db(tmp_path)
@@ -545,11 +626,23 @@ def test_answer_question_retrieves_from_knowledge_chunks(tmp_path, monkeypatch) 
     assert set(result["sources"][0]) == {"source", "title", "score"}
     assert result["sources"][0]["score"] > 0
     assert "Student Center entrance" in result["answer"]
+    assert "\n- Cafeteria" in result["answer"]
     assert result["intent"] == "room_location"
     assert result["language"] == "en"
     assert result["debug"]["retrieved_count"] >= 1
     assert result["debug"]["top_score"] > 0
     assert result["debug"]["context_chars"] > 0
+
+
+def test_sources_remain_clean_after_formatted_answer(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_db(tmp_path))
+
+    result = controller.answer_question("who are the professors?")
+
+    assert result["sources"]
+    assert set(result["sources"][0]) == {"source", "title", "score"}
+    assert isinstance(result["sources"][0]["score"], float)
 
 
 def test_answer_question_uses_retriever_pipeline(tmp_path, monkeypatch) -> None:

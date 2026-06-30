@@ -16,8 +16,6 @@ from PySide6.QtWidgets import (
 )
 
 from controllers.public_chat_controller import PublicChatController
-from controllers.public_chat_controller import ARABIC_NO_CONTEXT
-from controllers.public_chat_controller import ENGLISH_NO_CONTEXT
 from controllers.public_chat_controller import is_useless_answer
 from ui.public.theme import (
     BORDER,
@@ -52,6 +50,10 @@ WELCOME_ENGLISH = (
     "Hello! I'm ECU Smart Assistant. Ask me about university information, "
     "faculties, rooms, professors, courses, events, or services."
 )
+SAFE_FALLBACK_ANSWER = (
+    "I could not generate a useful answer. "
+    "Please try again or sync university data from the Data section."
+)
 WELCOME_ARABIC = (
     "مرحبًا! أنا مساعد ECU الذكي. يمكنك سؤالي عن معلومات الجامعة أو الكليات "
     "أو القاعات أو أعضاء هيئة التدريس أو الجداول أو الفعاليات."
@@ -61,19 +63,20 @@ WELCOME_ARABIC = (
 class ChatAnswerWorker(QObject):
     """Run chatbot answer generation away from the GUI thread."""
 
-    finished = Signal(dict)
-    failed = Signal(str)
+    result_ready = Signal(int, dict)
+    error = Signal(int, str)
 
-    def __init__(self, controller: PublicChatController, question: str) -> None:
+    def __init__(self, controller: PublicChatController, question: str, request_id: int) -> None:
         super().__init__()
         self.controller = controller
         self.question = question
+        self.request_id = request_id
 
     def run(self) -> None:
         try:
-            self.finished.emit(self.controller.answer_question(self.question))
+            self.result_ready.emit(self.request_id, self.controller.answer_question(self.question))
         except Exception as error:
-            self.failed.emit(str(error))
+            self.error.emit(self.request_id, str(error))
 
 
 class ChatScreen(QWidget):
@@ -92,7 +95,7 @@ class ChatScreen(QWidget):
         self._active_workers: list[ChatAnswerWorker] = []
         self.message_labels: list[QLabel] = []
         self.source_labels: list[QLabel] = []
-        self._message_rows: dict[QLabel, QHBoxLayout] = {}
+        self._message_rows: dict[QLabel, QWidget] = {}
         self._translations: dict[str, str] = {}
         self._last_user_question: str | None = None
         self._request_id = 0
@@ -259,31 +262,31 @@ class ChatScreen(QWidget):
     def _start_answer_worker(self, question: str, request_id: int) -> None:
         """Start a background worker for the controller call."""
         thread = QThread(self)
-        worker = ChatAnswerWorker(self.controller, question)
+        worker = ChatAnswerWorker(self.controller, question, request_id)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.finished.connect(lambda result: self._handle_answer_result(result, request_id))
-        worker.failed.connect(lambda error: self._handle_answer_error(error, request_id))
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        worker.finished.connect(lambda: self._active_workers.remove(worker) if worker in self._active_workers else None)
-        worker.failed.connect(lambda: self._active_workers.remove(worker) if worker in self._active_workers else None)
+        worker.result_ready.connect(self._handle_answer_result)
+        worker.error.connect(self._handle_answer_error)
+        worker.result_ready.connect(thread.quit)
+        worker.error.connect(thread.quit)
+        worker.result_ready.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+        worker.result_ready.connect(lambda *_args: self._active_workers.remove(worker) if worker in self._active_workers else None)
+        worker.error.connect(lambda *_args: self._active_workers.remove(worker) if worker in self._active_workers else None)
         thread.finished.connect(lambda: self._active_threads.remove(thread) if thread in self._active_threads else None)
         thread.finished.connect(thread.deleteLater)
         self._active_threads.append(thread)
         self._active_workers.append(worker)
         thread.start()
 
-    def _handle_answer_result(self, result: dict, request_id: int) -> None:
+    def _handle_answer_result(self, request_id: int, result: dict) -> None:
         """Render a completed bot answer."""
         if request_id != self._request_id:
             return
         self._remove_thinking_bubble()
         confidence = str(result.get("confidence", "low"))
         route = str(result.get("route", "fallback"))
-        sources = [] if route == "no_context" else list(result.get("sources") or [])
+        sources = list(result.get("sources") or [])
         debug = dict(result.get("debug") or {})
         self.chat_status_label.setText(self._status_text(route, confidence, sources, debug))
         self.chat_thinking_label.setVisible(False)
@@ -292,16 +295,16 @@ class ChatScreen(QWidget):
         self.chat_retry_button.setEnabled(bool(self._last_user_question))
         answer = str(result.get("answer") or "").strip()
         if is_useless_answer(answer):
-            answer = ARABIC_NO_CONTEXT if str(result.get("language", "")) == "ar" else ENGLISH_NO_CONTEXT
-        self._start_typing_answer(answer, sources, route)
+            answer = SAFE_FALLBACK_ANSWER
+        self._display_answer(answer, sources)
 
-    def _handle_answer_error(self, _error: str, request_id: int) -> None:
+    def _handle_answer_error(self, request_id: int, _error: str) -> None:
         """Render a safe message when answer generation fails unexpectedly."""
         if request_id != self._request_id:
             return
         self._remove_thinking_bubble()
-        self.add_bot_message("I could not answer safely right now. Please try another question.")
-        self.chat_status_label.setText("Assistant error handled safely.")
+        self.add_bot_message("Sorry, I had a problem generating the answer. Please try again.")
+        self.chat_status_label.setText("Assistant error. Please try again.")
         self.chat_thinking_label.setVisible(False)
         self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
@@ -333,20 +336,21 @@ class ChatScreen(QWidget):
         sources_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         sources_label.setMaximumWidth(640)
 
-        row = QHBoxLayout()
+        row_widget = QWidget(self.chat_messages_container)
+        row_widget.setObjectName("chat_sources_row")
+        row = QHBoxLayout(row_widget)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(sources_label)
         row.addStretch()
 
-        insert_index = max(0, self.chat_messages_layout.count() - 1)
-        self.chat_messages_layout.insertLayout(insert_index, row)
+        self._insert_message_row(row_widget)
         self.source_labels.append(sources_label)
-        self._message_rows[sources_label] = row
+        self._message_rows[sources_label] = row_widget
         self._scroll_to_bottom()
         return sources_label
 
     def _add_message(self, text: str, sender: str) -> QLabel:
-        bubble = QLabel(text)
+        bubble = QLabel(text, self.chat_messages_container)
         bubble.setWordWrap(True)
         bubble.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         bubble.setObjectName("chat_user_message" if sender == "user" else "chat_bot_message")
@@ -354,7 +358,9 @@ class ChatScreen(QWidget):
         bubble.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         bubble.setMaximumWidth(640)
 
-        row = QHBoxLayout()
+        row_widget = QWidget(self.chat_messages_container)
+        row_widget.setObjectName("chat_user_row" if sender == "user" else "chat_bot_row")
+        row = QHBoxLayout(row_widget)
         row.setContentsMargins(0, 0, 0, 0)
         if sender == "user":
             row.addStretch()
@@ -363,12 +369,21 @@ class ChatScreen(QWidget):
             row.addWidget(bubble)
             row.addStretch()
 
-        insert_index = max(0, self.chat_messages_layout.count() - 1)
-        self.chat_messages_layout.insertLayout(insert_index, row)
+        self._insert_message_row(row_widget)
         self.message_labels.append(bubble)
-        self._message_rows[bubble] = row
+        self._message_rows[bubble] = row_widget
         self._scroll_to_bottom()
         return bubble
+
+    def _insert_message_row(self, row_widget: QWidget) -> None:
+        """Insert a message row widget inside the scroll area's message layout."""
+        last_index = self.chat_messages_layout.count() - 1
+        if last_index >= 0:
+            last_item = self.chat_messages_layout.itemAt(last_index)
+            if last_item is not None and last_item.spacerItem() is not None:
+                self.chat_messages_layout.takeAt(last_index)
+        self.chat_messages_layout.addWidget(row_widget)
+        self.chat_messages_layout.addStretch()
 
     def _scroll_to_bottom(self) -> None:
         QTimer.singleShot(0, lambda: self.chat_messages_area.verticalScrollBar().setValue(
@@ -379,16 +394,14 @@ class ChatScreen(QWidget):
         """Format public source metadata without exposing noisy internals."""
         lines = ["Sources:"]
         for source in sources[:5]:
-            source_name = self._source_display_name(str(source.get("source", "")))
+            source_name = str(source.get("source", "")).strip().lower()
             title = str(source.get("title", "")).strip()
-            score = self._format_source_score(source.get("score"))
-            suffix = f" ({score})" if score else ""
             if source_name and title:
-                lines.append(f"- {source_name}: {title}{suffix}")
+                lines.append(f"- {source_name}: {title}")
             elif title:
-                lines.append(f"- {title}{suffix}")
+                lines.append(f"- {title}")
             elif source_name:
-                lines.append(f"- {source_name}{suffix}")
+                lines.append(f"- {source_name}")
         return "\n".join(lines)
 
     def _source_display_name(self, source: str) -> str:
@@ -437,6 +450,13 @@ class ChatScreen(QWidget):
     def _add_welcome_message(self) -> None:
         """Add the localized welcome assistant message."""
         self.add_bot_message(WELCOME_ARABIC if self._is_arabic_ui else WELCOME_ENGLISH)
+
+    def _display_answer(self, text: str, sources: list[dict]) -> None:
+        """Display the completed assistant answer immediately and reliably."""
+        self._stop_typing()
+        self.add_bot_message(text)
+        if sources:
+            self.add_sources_message(sources)
 
     def _start_typing_answer(self, text: str, sources: list[dict], route: str) -> None:
         """Reveal assistant answer with a lightweight QTimer typing effect."""
@@ -489,15 +509,15 @@ class ChatScreen(QWidget):
             self._thinking_bubble = None
 
     def _remove_label(self, label: QLabel) -> None:
-        row = self._message_rows.pop(label, None)
-        if row is None:
+        row_widget = self._message_rows.pop(label, None)
+        if row_widget is None:
             return
         for index in range(self.chat_messages_layout.count()):
             item = self.chat_messages_layout.itemAt(index)
-            if item is not None and item.layout() is row:
+            if item is not None and item.widget() is row_widget:
                 self.chat_messages_layout.takeAt(index)
                 break
-        self._delete_layout(row)
+        row_widget.deleteLater()
         if label in self.message_labels:
             self.message_labels.remove(label)
         if label in self.source_labels:

@@ -1,12 +1,13 @@
 """Headless tests for the public chat screen."""
 
 import os
+import threading
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QLabel, QDialog, QLineEdit, QMainWindow, QPushButton, QScrollArea
 
 from ui.public.screens.chat_screen import ChatScreen
 
@@ -42,6 +43,31 @@ class SlowFakeChatController(FakeChatController):
         return super().answer_question(question)
 
 
+class BlockingFakeChatController(FakeChatController):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def answer_question(self, question: str) -> dict:
+        self.questions.append(question)
+        self.started.set()
+        self.release.wait(timeout=2)
+        return {
+            "answer": f"Released answer for: {question}",
+            "confidence": "medium",
+            "sources": self.sources,
+            "route": "rag_fallback",
+            "debug": {"chunk_count_after": 4, "auto_synced_database": False},
+        }
+
+
+class FailingFakeChatController(FakeChatController):
+    def answer_question(self, question: str) -> dict:
+        self.questions.append(question)
+        raise RuntimeError("boom")
+
+
 def _get_application() -> QApplication:
     application = QApplication.instance()
     if application is None:
@@ -57,6 +83,40 @@ def _process_until(predicate, timeout_ms: int = 2000) -> None:
         time.sleep(0.01)
         deadline -= 10
     application.processEvents()
+
+
+def _row_for_label(screen: ChatScreen, label: QLabel):
+    return screen._message_rows[label]
+
+
+def _is_left_aligned(screen: ChatScreen, label: QLabel) -> bool:
+    row = _row_for_label(screen, label).layout()
+    return row.itemAt(0).widget() is label and row.itemAt(1).spacerItem() is not None
+
+
+def _is_right_aligned(screen: ChatScreen, label: QLabel) -> bool:
+    row = _row_for_label(screen, label).layout()
+    return row.itemAt(0).spacerItem() is not None and row.itemAt(1).widget() is label
+
+
+def _is_inside_messages_container(screen: ChatScreen, widget) -> bool:
+    current = widget
+    while current is not None:
+        if current is screen.chat_messages_container:
+            return True
+        current = current.parentWidget()
+    return False
+
+
+def _assert_message_is_not_top_level(screen: ChatScreen, label: QLabel) -> None:
+    application = _get_application()
+    row_widget = _row_for_label(screen, label)
+    assert row_widget not in application.topLevelWidgets()
+    assert label not in application.topLevelWidgets()
+    assert not isinstance(row_widget, (QDialog, QMainWindow))
+    assert not isinstance(label, (QDialog, QMainWindow))
+    assert _is_inside_messages_container(screen, row_widget)
+    assert _is_inside_messages_container(screen, label)
 
 
 def test_chat_screen_can_be_created() -> None:
@@ -105,13 +165,43 @@ def test_sending_message_adds_user_and_bot_messages() -> None:
         assert screen.message_labels[-2].property("sender") == "user"
         assert screen.message_labels[-1].property("sender") == "bot"
         assert "Dynamic answer" in screen.message_labels[-1].text()
+        assert _is_right_aligned(screen, screen.message_labels[-2])
+        assert _is_left_aligned(screen, screen.message_labels[-1])
+        _assert_message_is_not_top_level(screen, screen.message_labels[-2])
+        _assert_message_is_not_top_level(screen, screen.message_labels[-1])
+    finally:
+        screen.close()
+
+
+def test_sending_message_does_not_create_top_level_window() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        top_levels_before = set(application.topLevelWidgets())
+        screen.chat_input.setText("Who are the professors?")
+        screen.send_message()
+        _process_until(lambda: "Dynamic answer" in screen.message_labels[-1].text())
+        top_levels_after = set(application.topLevelWidgets())
+
+        assert top_levels_after == top_levels_before
+        for label in [*screen.message_labels, *screen.source_labels]:
+            _assert_message_is_not_top_level(screen, label)
     finally:
         screen.close()
 
 
 def test_sources_are_displayed_when_returned() -> None:
     application = _get_application()
-    screen = ChatScreen(controller=FakeChatController())
+    controller = FakeChatController()
+    controller.route = "rag_fallback"
+    controller.sources = [
+        {"source": "faq", "title": "How can I find a professor office?", "score": 72, "id": "faq:1"},
+        {"source": "professors", "title": "Ass. Prof. Dr. Marwa Taher", "score": 31, "id": "professors:1"},
+        {"source": "professors", "title": "Ass. Prof. Marian Mamdouh", "score": 31, "id": "professors:2"},
+    ]
+    screen = ChatScreen(controller=controller)
     try:
         assert application is not None
         screen.chat_input.setText("Where is cafeteria?")
@@ -121,8 +211,13 @@ def test_sources_are_displayed_when_returned() -> None:
         sources_area = screen.source_labels[-1]
         assert sources_area.objectName() == "chat_sources_area"
         assert "Sources:" in sources_area.text()
-        assert "FAQ: Test" in sources_area.text()
-        assert "score 72" in sources_area.text()
+        assert "- faq: How can I find a professor office?" in sources_area.text()
+        assert "- professors: Ass. Prof. Dr. Marwa Taher" in sources_area.text()
+        assert "- professors: Ass. Prof. Marian Mamdouh" in sources_area.text()
+        assert "score" not in sources_area.text()
+        assert "faq:1" not in sources_area.text()
+        assert _is_left_aligned(screen, sources_area)
+        _assert_message_is_not_top_level(screen, sources_area)
     finally:
         screen.close()
 
@@ -131,7 +226,7 @@ def test_no_sources_are_displayed_for_no_context() -> None:
     application = _get_application()
     controller = FakeChatController()
     controller.route = "no_context"
-    controller.sources = [{"source": "faq", "title": "Hidden", "score": 9}]
+    controller.sources = []
     screen = ChatScreen(controller=controller)
     try:
         assert application is not None
@@ -198,21 +293,27 @@ def test_useless_controller_answer_is_displayed_as_readable_message() -> None:
         assert application is not None
         screen.chat_input.setText("Unknown topic")
         screen.send_message()
-        _process_until(lambda: "I do not have enough information" in screen.message_labels[-1].text())
+        _process_until(lambda: "I could not generate a useful answer" in screen.message_labels[-1].text())
         assert screen.message_labels[-1].text() != "?"
+        assert screen.message_labels[-1].text() == (
+            "I could not generate a useful answer. "
+            "Please try again or sync university data from the Data section."
+        )
     finally:
         screen.close()
 
 
 def test_status_label_shows_route_and_source_count() -> None:
     application = _get_application()
-    screen = ChatScreen(controller=FakeChatController())
+    controller = FakeChatController()
+    controller.route = "rag_fallback"
+    screen = ChatScreen(controller=controller)
     try:
         assert application is not None
         screen.chat_input.setText("Where is cafeteria?")
         screen.send_message()
-        _process_until(lambda: "Answered from database_context" in screen.chat_status_label.text())
-        assert screen.chat_status_label.text() == "Answered from database_context | 1 sources | high confidence"
+        _process_until(lambda: "Answered from rag_fallback" in screen.chat_status_label.text())
+        assert screen.chat_status_label.text() == "Answered from rag_fallback | 1 sources | high confidence"
     finally:
         screen.close()
 
@@ -256,6 +357,53 @@ def test_thinking_state_disables_and_reenables_send_button() -> None:
         _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
         assert screen.chat_send_button.isEnabled() is True
         assert screen.chat_thinking_label.isHidden() is True
+    finally:
+        screen.close()
+
+
+def test_message_send_is_responsive_while_worker_is_running() -> None:
+    application = _get_application()
+    controller = BlockingFakeChatController()
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        initial_count = len(screen.message_labels)
+        screen.chat_input.setText("Who are the professors?")
+        screen.send_message()
+        _process_until(lambda: controller.started.is_set())
+
+        assert controller.questions == ["Who are the professors?"]
+        assert screen.chat_send_button.isEnabled() is False
+        assert len(screen.message_labels) == initial_count + 2
+        assert screen.message_labels[-2].text() == "Who are the professors?"
+        assert screen.message_labels[-2].property("sender") == "user"
+        assert screen.message_labels[-1].text() == "Thinking..."
+        assert screen.message_labels[-1].property("sender") == "bot"
+        assert _is_right_aligned(screen, screen.message_labels[-2])
+        assert _is_left_aligned(screen, screen.message_labels[-1])
+
+        controller.release.set()
+        _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
+        assert screen.message_labels[-1].text().startswith("Released answer for:")
+        assert screen.chat_status_label.text() == "Answered from rag_fallback | 1 sources | medium confidence"
+    finally:
+        controller.release.set()
+        screen.close()
+
+
+def test_worker_error_displays_friendly_message_and_reenables_send() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=FailingFakeChatController())
+    try:
+        assert application is not None
+        screen.chat_input.setText("Who are the professors?")
+        screen.send_message()
+        assert screen.chat_send_button.isEnabled() is False
+        _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
+        assert screen.message_labels[-1].property("sender") == "bot"
+        assert screen.message_labels[-1].text() == "Sorry, I had a problem generating the answer. Please try again."
+        assert screen.chat_status_label.text() == "Assistant error. Please try again."
+        assert screen.chat_send_button.isEnabled() is True
     finally:
         screen.close()
 

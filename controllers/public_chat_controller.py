@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import string
 from pathlib import Path
 from typing import Any, Callable
@@ -317,20 +318,21 @@ class PublicChatController:
         if not context_items:
             return self._insufficient_answer(question)
 
-        top_chunks = context_items[:3]
-        if detect_language(question) == "ar":
-            details = " ".join(
-                f"{chunk['title']}: {chunk['content']}" for chunk in top_chunks
-            )
-            return (
-                "\u0628\u0646\u0627\u0621 \u0639\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a "
-                f"\u0627\u0644\u062c\u0627\u0645\u0639\u0629: {details}"
-            )
-
-        details = " ".join(
-            f"{chunk['title']}: {chunk['content']}" for chunk in top_chunks
-        )
-        return f"Based on ECU university data: {details}"
+        language = detect_language(question)
+        intent = detect_intent(question)
+        if intent == "professor_info":
+            professor_chunks = [chunk for chunk in context_items if chunk.get("source") == "professors"]
+            if professor_chunks:
+                return self._format_professor_answer(question, professor_chunks, language)
+        if intent == "faculty_info":
+            faculty_chunks = [chunk for chunk in context_items if chunk.get("source") == "faculties"]
+            if faculty_chunks:
+                return self._format_faculty_answer(faculty_chunks, language)
+        if intent == "room_location":
+            room_chunks = [chunk for chunk in context_items if chunk.get("source") == "rooms"]
+            if room_chunks:
+                return self._format_room_answer(room_chunks, language)
+        return self._format_general_answer(context_items, language)
 
     def _confidence_for(self, context_items: list[dict[str, Any]], route: str) -> str:
         if not context_items:
@@ -384,6 +386,179 @@ class PublicChatController:
         else:
             note = "Available information is limited. "
         return answer if answer.startswith(note.strip()) else f"{note}{answer}"
+
+    def _format_professor_answer(
+        self,
+        question: str,
+        chunks: list[dict[str, Any]],
+        language: str,
+    ) -> str:
+        limit = len(chunks) if self._asks_for_all(question) else min(5, len(chunks))
+        intro = (
+            "\u0628\u0646\u0627\u0621\u064b \u0639\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0627\u0645\u0639\u0629\u060c \u0647\u0630\u0647 \u0628\u0639\u0636 \u0646\u062a\u0627\u0626\u062c \u0623\u0639\u0636\u0627\u0621 \u0647\u064a\u0626\u0629 \u0627\u0644\u062a\u062f\u0631\u064a\u0633 \u0627\u0644\u0645\u062a\u0627\u062d\u0629:"
+            if language == "ar"
+            else "Based on ECU university data, here are some available professors:"
+        )
+        labels = self._labels(language)
+        lines = [intro]
+        for chunk in chunks[:limit]:
+            fields = self._extract_labeled_fields(str(chunk.get("content", "")))
+            lines.append("")
+            lines.append(f"- {chunk.get('title', 'Professor')}")
+            for key, label in (
+                ("Faculty", labels["faculty"]),
+                ("Office", labels["office"]),
+                ("Office hours", labels["office_hours"]),
+                ("Email", labels["email"]),
+            ):
+                value = fields.get(key)
+                if value:
+                    lines.append(f"  {label}: {value}")
+        return "\n".join(lines)
+
+    def _format_faculty_answer(self, chunks: list[dict[str, Any]], language: str) -> str:
+        intro = (
+            "\u0628\u0646\u0627\u0621\u064b \u0639\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0627\u0645\u0639\u0629\u060c \u0647\u0630\u0647 \u0628\u0639\u0636 \u0627\u0644\u0643\u0644\u064a\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u062d\u0629:"
+            if language == "ar"
+            else "Based on ECU university data, here are some available faculties:"
+        )
+        labels = self._labels(language)
+        lines = [intro]
+        for chunk in chunks[:5]:
+            content = str(chunk.get("content", ""))
+            fields = self._extract_labeled_fields(content)
+            description = self._content_before_first_label(content)
+            lines.append("")
+            lines.append(f"- {chunk.get('title', 'Faculty')}")
+            if description:
+                lines.append(f"  {labels['description']}: {description}")
+            for key, label in (("Building", labels["building"]), ("Dean", labels["dean"])):
+                value = fields.get(key)
+                if value:
+                    lines.append(f"  {label}: {value}")
+        return "\n".join(lines)
+
+    def _format_room_answer(self, chunks: list[dict[str, Any]], language: str) -> str:
+        intro = (
+            "\u0628\u0646\u0627\u0621\u064b \u0639\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0627\u0645\u0639\u0629\u060c \u0647\u0630\u0647 \u0628\u0639\u0636 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u0645\u062a\u0627\u062d\u0629:"
+            if language == "ar"
+            else "Based on ECU university data, here are the relevant locations:"
+        )
+        labels = self._labels(language)
+        lines = [intro]
+        for chunk in chunks[:5]:
+            content = str(chunk.get("content", ""))
+            fields = self._extract_labeled_fields(content)
+            description = self._content_after_known_labels(content)
+            lines.append("")
+            lines.append(f"- {chunk.get('title', 'Location')}")
+            for key, label in (
+                ("Building", labels["building"]),
+                ("Floor", labels["floor"]),
+                ("Category", labels["category"]),
+            ):
+                value = fields.get(key)
+                if value:
+                    lines.append(f"  {label}: {value}")
+            if description:
+                lines.append(f"  {labels['description']}: {description}")
+        return "\n".join(lines)
+
+    def _format_general_answer(self, chunks: list[dict[str, Any]], language: str) -> str:
+        intro = (
+            "\u0628\u0646\u0627\u0621\u064b \u0639\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0627\u0645\u0639\u0629\u060c \u0647\u0630\u0647 \u0628\u0639\u0636 \u0627\u0644\u0646\u062a\u0627\u0626\u062c \u0627\u0644\u0645\u062a\u0627\u062d\u0629:"
+            if language == "ar"
+            else "Based on ECU university data, here are the most relevant results:"
+        )
+        lines = [intro]
+        for chunk in chunks[:3]:
+            summary = self._summarize_content(str(chunk.get("content", "")))
+            lines.append("")
+            lines.append(f"- {chunk.get('title', 'Result')}")
+            if summary:
+                lines.append(f"  {summary}")
+        return "\n".join(lines)
+
+    def _labels(self, language: str) -> dict[str, str]:
+        if language == "ar":
+            return {
+                "faculty": "\u0627\u0644\u0643\u0644\u064a\u0629",
+                "office": "\u0627\u0644\u0645\u0643\u062a\u0628",
+                "office_hours": "\u0633\u0627\u0639\u0627\u062a \u0627\u0644\u0645\u0643\u062a\u0628",
+                "email": "\u0627\u0644\u0628\u0631\u064a\u062f \u0627\u0644\u0625\u0644\u0643\u062a\u0631\u0648\u0646\u064a",
+                "description": "\u0627\u0644\u0648\u0635\u0641",
+                "building": "\u0627\u0644\u0645\u0628\u0646\u0649",
+                "dean": "\u0627\u0644\u0639\u0645\u064a\u062f",
+                "floor": "\u0627\u0644\u062f\u0648\u0631",
+                "category": "\u0627\u0644\u0646\u0648\u0639",
+            }
+        return {
+            "faculty": "Faculty",
+            "office": "Office",
+            "office_hours": "Office hours",
+            "email": "Email",
+            "description": "Description",
+            "building": "Building",
+            "dean": "Dean",
+            "floor": "Floor",
+            "category": "Category",
+        }
+
+    def _extract_labeled_fields(self, content: str) -> dict[str, str]:
+        labels = ("Faculty", "Office", "Email", "Phone", "Office hours", "Building", "Dean", "Floor", "Category", "Room number")
+        fields: dict[str, str] = {}
+        for index, label in enumerate(labels):
+            next_labels = "|".join(re.escape(next_label) for next_label in labels[index + 1 :])
+            pattern = rf"{re.escape(label)}:\s*(.*?)(?=\s+(?:{next_labels}):|$)" if next_labels else rf"{re.escape(label)}:\s*(.*)$"
+            match = re.search(pattern, content)
+            if match:
+                value = self._clean_field_value(match.group(1))
+                if label == "Office hours":
+                    value = self._clean_office_hours(value)
+                elif label == "Category":
+                    value = self._clean_category(value)
+                fields[label] = value
+        return fields
+
+    def _content_before_first_label(self, content: str) -> str:
+        match = re.search(r"\s+(?:Faculty|Office|Email|Phone|Office hours|Building|Dean|Floor|Category|Room number):", content)
+        return self._clean_field_value(content[: match.start()] if match else content)
+
+    def _content_after_known_labels(self, content: str) -> str:
+        fields = self._extract_labeled_fields(content)
+        category = fields.get("Category")
+        if category:
+            match = re.search(rf"Category:\s*{re.escape(category)}\s*(.*)$", content)
+            if match:
+                return self._clean_field_value(match.group(1))
+        description = content
+        for label, value in fields.items():
+            description = description.replace(f"{label}: {value}", "")
+        description = re.sub(r"\bRoom number:\s*\S+", "", description)
+        return self._clean_field_value(description)
+
+    def _summarize_content(self, content: str, limit: int = 220) -> str:
+        summary = self._clean_field_value(content)
+        return f"{summary[: limit - 3].rstrip()}..." if len(summary) > limit else summary
+
+    def _clean_field_value(self, value: str) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip(" .")
+
+    def _clean_office_hours(self, value: str) -> str:
+        match = re.search(
+            r"^((?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s+\d{1,2}:\d{2}-\d{1,2}:\d{2})",
+            value,
+            re.IGNORECASE,
+        )
+        return match.group(1) if match else value
+
+    def _clean_category(self, value: str) -> str:
+        match = re.match(r"^(Service|Lecture|Lab|Office|Hall|Classroom|Administrative|Clinic|Studio)\b", value, re.IGNORECASE)
+        return match.group(1) if match else value
+
+    def _asks_for_all(self, question: str) -> bool:
+        lowered = question.casefold()
+        return "all" in lowered or "\u0643\u0644" in lowered or "\u062c\u0645\u064a\u0639" in lowered
 
     def _sources_from_chunks(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Return public source metadata for retrieved chunks."""

@@ -14,6 +14,13 @@ _INTENT_SOURCES = {
     "admission_info": {"faq", "website", "document", "faculties"},
     "general_info": {"faq", "website", "document", "faculties"},
 }
+_PRIMARY_INTENT_SOURCES = {
+    "faculty_info": {"faculties"},
+    "professor_info": {"professors"},
+    "room_location": {"rooms"},
+    "course_schedule": {"courses"},
+    "event_info": {"events"},
+}
 
 
 def rerank_chunks(
@@ -56,6 +63,12 @@ def rerank_chunks(
             score += len(title_overlap) * 8
         if intent and source in _INTENT_SOURCES.get(intent, set()) and overlap:
             score += 8
+        primary_sources = _PRIMARY_INTENT_SOURCES.get(str(intent or ""), set())
+        if primary_sources:
+            if source in primary_sources:
+                score += 28
+            elif source == "faq":
+                score -= 16
         score += _focus_bonus(content)
         if not overlap and not title_overlap:
             score -= 18

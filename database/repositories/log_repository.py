@@ -16,6 +16,17 @@ LEFT JOIN faq ON logs.matched_faq_id = faq.id
 
 _LOG_ORDER_SQL = " ORDER BY logs.created_at DESC, logs.id DESC"
 
+_CHATBOT_LOGS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    event_type TEXT,
+    message TEXT,
+    source_used TEXT,
+    had_context INTEGER
+);
+"""
+
 
 def _clean_required_text(value: str, field_name: str) -> str:
     """Normalize required text or raise a clear validation error."""
@@ -37,6 +48,105 @@ def _validate_limit(limit: int) -> None:
     """Ensure analytics and history limits are positive integers."""
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("Limit must be a positive integer.")
+
+
+def log_chatbot_interaction(
+    db_path,
+    question: str,
+    source_used: str,
+    had_context: bool,
+    timestamp: str | None = None,
+) -> bool:
+    """Safely log one chatbot interaction without raising to the caller."""
+    try:
+        normalized_question = question.strip()
+        if not normalized_question:
+            return False
+
+        connection = sqlite3.connect(Path(db_path))
+        try:
+            _ensure_logs_table(connection)
+            columns = _get_logs_columns(connection)
+            values = _build_chatbot_log_values(
+                columns,
+                normalized_question,
+                source_used,
+                had_context,
+                timestamp,
+            )
+            if not values:
+                return False
+
+            column_names = list(values.keys())
+            placeholders = ", ".join("?" for _ in column_names)
+            quoted_columns = ", ".join(f'"{column}"' for column in column_names)
+            connection.execute(
+                f"INSERT INTO logs ({quoted_columns}) VALUES ({placeholders})",
+                [values[column] for column in column_names],
+            )
+            connection.commit()
+            return True
+        finally:
+            connection.close()
+    except Exception:
+        return False
+
+
+def _ensure_logs_table(connection: sqlite3.Connection) -> None:
+    table_exists = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'logs'
+        """
+    ).fetchone()
+    if table_exists is None:
+        connection.execute(_CHATBOT_LOGS_TABLE_SQL)
+        connection.commit()
+
+
+def _get_logs_columns(connection: sqlite3.Connection) -> set[str]:
+    rows = connection.execute('PRAGMA table_info("logs")').fetchall()
+    return {row[1] for row in rows}
+
+
+def _build_chatbot_log_values(
+    columns: set[str],
+    question: str,
+    source_used: str,
+    had_context: bool,
+    timestamp: str | None,
+) -> dict[str, object]:
+    values: dict[str, object] = {}
+
+    if "timestamp" in columns:
+        values["timestamp"] = timestamp
+    elif "created_at" in columns and timestamp is not None:
+        values["created_at"] = timestamp
+
+    if "event_type" in columns:
+        values["event_type"] = "chatbot_interaction"
+    elif "screen_name" in columns:
+        values["screen_name"] = "chatbot_interaction"
+
+    if "message" in columns:
+        values["message"] = question
+    elif "query_text" in columns:
+        values["query_text"] = question
+    else:
+        return {}
+
+    if "source_used" in columns:
+        values["source_used"] = source_used
+    if "had_context" in columns:
+        values["had_context"] = 1 if had_context else 0
+    elif "response_text" in columns:
+        values["response_text"] = (
+            f"source_used={source_used}; had_context={1 if had_context else 0}"
+        )
+
+    return values
 
 
 def create_log(

@@ -15,8 +15,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from controllers.public_chat_controller import PublicChatController
 from controllers.public_chat_controller import is_useless_answer
+from database.connection import DB_NAME
+from services.rag_chatbot import get_chatbot_response
 from ui.public.theme import (
     BORDER,
     CHARCOAL,
@@ -51,8 +52,10 @@ WELCOME_ENGLISH = (
     "faculties, rooms, professors, courses, events, or services."
 )
 SAFE_FALLBACK_ANSWER = (
-    "I could not generate a useful answer. "
-    "Please try again or sync university data from the Data section."
+    "Sorry, I could not generate a useful answer. Please try again."
+)
+SAFE_FALLBACK_ANSWER_AR = (
+    "عذرًا، لم أتمكن من إنشاء إجابة مفيدة. من فضلك حاول مرة أخرى."
 )
 WELCOME_ARABIC = (
     "مرحبًا! أنا مساعد ECU الذكي. يمكنك سؤالي عن معلومات الجامعة أو الكليات "
@@ -65,18 +68,32 @@ class ChatAnswerWorker(QObject):
 
     result_ready = Signal(int, dict)
     error = Signal(int, str)
+    finished = Signal()
 
-    def __init__(self, controller: PublicChatController, question: str, request_id: int) -> None:
+    def __init__(
+        self,
+        question: str,
+        db_path,
+        request_id: int,
+        response_provider=None,
+    ) -> None:
         super().__init__()
-        self.controller = controller
         self.question = question
+        self.db_path = db_path
         self.request_id = request_id
+        self.response_provider = response_provider
 
     def run(self) -> None:
         try:
-            self.result_ready.emit(self.request_id, self.controller.answer_question(self.question))
+            if self.response_provider is not None:
+                result = self.response_provider(self.question)
+            else:
+                result = get_chatbot_response(self.question, self.db_path)
+            self.result_ready.emit(self.request_id, result)
         except Exception as error:
             self.error.emit(self.request_id, str(error))
+        finally:
+            self.finished.emit()
 
 
 class ChatScreen(QWidget):
@@ -84,21 +101,25 @@ class ChatScreen(QWidget):
 
     def __init__(
         self,
-        controller: PublicChatController | None = None,
+        controller=None,
         parent_window=None,
+        db_path=DB_NAME,
     ) -> None:
         super().__init__()
-        self.controller = controller or PublicChatController()
+        self.controller = controller
         self.parent_window = parent_window
+        self.db_path = db_path
         self._last_pending_question: str | None = None
         self._active_threads: list[QThread] = []
         self._active_workers: list[ChatAnswerWorker] = []
         self.message_labels: list[QLabel] = []
         self.source_labels: list[QLabel] = []
+        self.quick_action_buttons: list[QPushButton] = []
         self._message_rows: dict[QLabel, QWidget] = {}
         self._translations: dict[str, str] = {}
         self._last_user_question: str | None = None
         self._request_id = 0
+        self._request_running = False
         self._typing_timer: QTimer | None = None
         self._typing_label: QLabel | None = None
         self._typing_text = ""
@@ -106,6 +127,7 @@ class ChatScreen(QWidget):
         self._pending_sources: list[dict] = []
         self._pending_route = ""
         self._thinking_bubble: QLabel | None = None
+        self._thinking_question = ""
         self._is_arabic_ui = False
         self.setObjectName("chat_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -228,7 +250,10 @@ class ChatScreen(QWidget):
         self._request_id += 1
         self._stop_typing()
         self._clear_message_area()
+        self.quick_action_buttons.clear()
         self._last_user_question = None
+        self._request_running = False
+        self.chat_send_button.setEnabled(True)
         self.chat_retry_button.setEnabled(False)
         clear_memory = getattr(self.controller, "clear_memory", None)
         if callable(clear_memory):
@@ -243,6 +268,9 @@ class ChatScreen(QWidget):
         if not question:
             self.chat_status_label.setText("Type a question first.")
             return
+        if self._request_running:
+            self.chat_status_label.setText("Please wait for the current answer.")
+            return
 
         self._stop_typing()
         if add_user_bubble:
@@ -255,24 +283,28 @@ class ChatScreen(QWidget):
         self.chat_thinking_label.setText(thinking_text)
         self.chat_thinking_label.setVisible(True)
         self._thinking_bubble = self.add_bot_message(thinking_text)
+        self._thinking_question = question
         self.chat_send_button.setEnabled(False)
+        self._request_running = True
         self._request_id += 1
         self._start_answer_worker(question, self._request_id)
 
     def _start_answer_worker(self, question: str, request_id: int) -> None:
-        """Start a background worker for the controller call."""
+        """Start a background worker for the chatbot call."""
         thread = QThread(self)
-        worker = ChatAnswerWorker(self.controller, question, request_id)
+        worker = ChatAnswerWorker(
+            question=question,
+            db_path=self.db_path,
+            request_id=request_id,
+            response_provider=self._response_provider(),
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.result_ready.connect(self._handle_answer_result)
         worker.error.connect(self._handle_answer_error)
-        worker.result_ready.connect(thread.quit)
-        worker.error.connect(thread.quit)
-        worker.result_ready.connect(worker.deleteLater)
-        worker.error.connect(worker.deleteLater)
-        worker.result_ready.connect(lambda *_args: self._active_workers.remove(worker) if worker in self._active_workers else None)
-        worker.error.connect(lambda *_args: self._active_workers.remove(worker) if worker in self._active_workers else None)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(lambda: self._active_workers.remove(worker) if worker in self._active_workers else None)
         thread.finished.connect(lambda: self._active_threads.remove(thread) if thread in self._active_threads else None)
         thread.finished.connect(thread.deleteLater)
         self._active_threads.append(thread)
@@ -283,31 +315,35 @@ class ChatScreen(QWidget):
         """Render a completed bot answer."""
         if request_id != self._request_id:
             return
-        self._remove_thinking_bubble()
-        confidence = str(result.get("confidence", "low"))
-        route = str(result.get("route", "fallback"))
         sources = list(result.get("sources") or [])
-        debug = dict(result.get("debug") or {})
-        self.chat_status_label.setText(self._status_text(route, confidence, sources, debug))
+        source_used = str(result.get("source_used", "none"))
+        gemini_status = str(result.get("gemini_status", ""))
+        self.chat_status_label.setText(self._status_text(source_used, gemini_status))
         self.chat_thinking_label.setVisible(False)
         self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
+        self._request_running = False
         self.chat_retry_button.setEnabled(bool(self._last_user_question))
         answer = str(result.get("answer") or "").strip()
         if is_useless_answer(answer):
-            answer = SAFE_FALLBACK_ANSWER
-        self._display_answer(answer, sources)
+            answer = self._safe_fallback_answer()
+        self._display_answer(answer, [])
+        self.add_source_indicator(result)
+        self._add_quick_actions(
+            list(result.get("matched_rooms") or []),
+            list(result.get("matched_professors") or []),
+        )
 
     def _handle_answer_error(self, request_id: int, _error: str) -> None:
         """Render a safe message when answer generation fails unexpectedly."""
         if request_id != self._request_id:
             return
-        self._remove_thinking_bubble()
-        self.add_bot_message("Sorry, I had a problem generating the answer. Please try again.")
+        self._display_answer(self._safe_fallback_answer(), [])
         self.chat_status_label.setText("Assistant error. Please try again.")
         self.chat_thinking_label.setVisible(False)
         self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
+        self._request_running = False
         self.chat_retry_button.setEnabled(bool(self._last_user_question))
 
     def closeEvent(self, event) -> None:  # noqa: N802
@@ -348,6 +384,49 @@ class ChatScreen(QWidget):
         self._message_rows[sources_label] = row_widget
         self._scroll_to_bottom()
         return sources_label
+
+    def add_source_indicator(self, result: dict) -> QLabel:
+        """Append honest source metadata under the latest assistant answer."""
+        source_text = self._format_source_indicator(result)
+        sources_label = QLabel(source_text)
+        sources_label.setWordWrap(True)
+        sources_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        sources_label.setObjectName("chat_sources_area")
+        sources_label.setProperty("sender", "sources")
+        sources_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        sources_label.setMaximumWidth(640)
+
+        row_widget = QWidget(self.chat_messages_container)
+        row_widget.setObjectName("chat_sources_row")
+        row = QHBoxLayout(row_widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(sources_label)
+        row.addStretch()
+
+        self._insert_message_row(row_widget)
+        self.source_labels.append(sources_label)
+        self._message_rows[sources_label] = row_widget
+        self._scroll_to_bottom()
+        return sources_label
+
+    def add_quick_action_button(self, text: str, follow_up: str) -> QPushButton:
+        """Append a small follow-up button under the latest assistant answer."""
+        button = QPushButton(text, self.chat_messages_container)
+        button.setObjectName("chat_quick_action_button")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda checked=False, prompt=follow_up: self._handle_quick_action(prompt))
+
+        row_widget = QWidget(self.chat_messages_container)
+        row_widget.setObjectName("chat_quick_action_row")
+        row = QHBoxLayout(row_widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(button)
+        row.addStretch()
+
+        self._insert_message_row(row_widget)
+        self.quick_action_buttons.append(button)
+        self._scroll_to_bottom()
+        return button
 
     def _add_message(self, text: str, sender: str) -> QLabel:
         bubble = QLabel(text, self.chat_messages_container)
@@ -404,6 +483,51 @@ class ChatScreen(QWidget):
                 lines.append(f"- {source_name}")
         return "\n".join(lines)
 
+    def _format_source_indicator(self, result: dict) -> str:
+        """Format RAG source status without exposing debug or raw context."""
+        source_used = str(result.get("source_used", "none") or "none")
+        gemini_status = str(result.get("gemini_status", "") or "")
+        is_arabic = self._is_arabic_ui
+
+        if source_used == "database":
+            lines = ["\u0627\u0644\u0645\u0635\u062f\u0631: \u0633\u062c\u0644\u0627\u062a ECU" if is_arabic else "Source: ECU records"]
+        elif source_used == "ecu_website":
+            lines = ["\u0627\u0644\u0645\u0635\u062f\u0631: \u0645\u0648\u0642\u0639 ecu.edu.eg" if is_arabic else "Source: ecu.edu.eg"]
+        else:
+            lines = [
+                "\u0627\u0644\u0645\u0635\u062f\u0631: \u0644\u0627 \u062a\u0648\u062c\u062f \u0628\u064a\u0627\u0646\u0627\u062a \u0645\u0637\u0627\u0628\u0642\u0629 \u0641\u064a \u0645\u0635\u0627\u062f\u0631 ECU"
+                if is_arabic
+                else "Source: No matching ECU context found"
+            ]
+
+        if gemini_status == "ok":
+            lines.append("AI answer generated from retrieved ECU context")
+        elif source_used != "none":
+            lines.append("AI service unavailable - showing best available ECU match")
+
+        details = self._format_source_details(list(result.get("sources") or []))
+        if details:
+            lines.extend(details)
+        return "\n".join(lines)
+
+    def _format_source_details(self, sources: list[dict]) -> list[str]:
+        """Return up to three clean source detail lines."""
+        details: list[str] = []
+        for source in sources[:3]:
+            source_name = str(source.get("source", "") or "").strip()
+            title = str(source.get("title", "") or "").strip()
+            if not title:
+                continue
+            if source_name == "database":
+                table = str(source.get("source_table", "") or "").strip()
+                label = table or "database"
+            elif source_name == "ecu_website":
+                label = "ecu.edu.eg"
+            else:
+                label = source_name or "source"
+            details.append(f"- {label}: {title}")
+        return details
+
     def _source_display_name(self, source: str) -> str:
         """Convert source keys into clean visitor-facing labels."""
         labels = {
@@ -427,19 +551,15 @@ class ChatScreen(QWidget):
             return ""
         return f"score {numeric_score:.0f}"
 
-    def _status_text(
-        self,
-        route: str,
-        confidence: str,
-        sources: list[dict],
-        debug: dict,
-    ) -> str:
+    def _status_text(self, source_used: str, gemini_status: str) -> str:
         """Build a compact visitor-safe generation status line."""
-        if debug.get("auto_synced_database"):
-            return f"Knowledge synced automatically | {int(debug.get('chunk_count_after') or 0)} chunks"
-        if route == "no_context":
-            return f"No context found | {int(debug.get('chunk_count_after') or 0)} chunks"
-        return f"Answered from {route} | {len(sources)} sources | {confidence} confidence"
+        if gemini_status and gemini_status != "ok" and gemini_status != "not_called":
+            return "Gemini unavailable, used fallback"
+        if source_used == "database":
+            return "Answered from ECU records"
+        if source_used == "ecu_website":
+            return "Answered from ecu.edu.eg"
+        return "No ECU context found"
 
     def _thinking_text(self, question: str) -> str:
         """Return a brief loading state in the user's apparent language."""
@@ -454,9 +574,49 @@ class ChatScreen(QWidget):
     def _display_answer(self, text: str, sources: list[dict]) -> None:
         """Display the completed assistant answer immediately and reliably."""
         self._stop_typing()
-        self.add_bot_message(text)
+        if self._thinking_bubble is not None:
+            self._thinking_bubble.setText(text)
+            self._thinking_bubble = None
+            self._scroll_to_bottom()
+        else:
+            self.add_bot_message(text)
         if sources:
             self.add_sources_message(sources)
+
+    def _add_quick_actions(
+        self,
+        matched_rooms: list[dict],
+        matched_professors: list[dict],
+    ) -> None:
+        for match in matched_rooms:
+            title = str(match.get("title", "") or "").strip()
+            if title:
+                text = f"عرض القاعة: {title}" if self._is_arabic_ui else f"Open room: {title}"
+                follow_up = f"Tell me more about room {title}"
+                self.add_quick_action_button(text, follow_up)
+        for match in matched_professors:
+            title = str(match.get("title", "") or "").strip()
+            if title:
+                text = (
+                    f"عضو هيئة التدريس: {title}"
+                    if self._is_arabic_ui
+                    else f"Professor: {title}"
+                )
+                follow_up = f"Tell me more about professor {title}"
+                self.add_quick_action_button(text, follow_up)
+
+    def _handle_quick_action(self, follow_up: str) -> None:
+        self.chat_input.setText(follow_up)
+
+    def _safe_fallback_answer(self) -> str:
+        if self._is_arabic_ui or any("\u0600" <= char <= "\u06ff" for char in self._thinking_question):
+            return SAFE_FALLBACK_ANSWER_AR
+        return SAFE_FALLBACK_ANSWER
+
+    def _response_provider(self):
+        if self.controller is not None and hasattr(self.controller, "answer_question"):
+            return self.controller.answer_question
+        return None
 
     def _start_typing_answer(self, text: str, sources: list[dict], route: str) -> None:
         """Reveal assistant answer with a lightweight QTimer typing effect."""
@@ -529,6 +689,7 @@ class ChatScreen(QWidget):
             self._delete_layout_item(item)
         self.message_labels.clear()
         self.source_labels.clear()
+        self.quick_action_buttons.clear()
         self._message_rows.clear()
         self._thinking_bubble = None
         self.chat_messages_layout.addStretch()
@@ -703,6 +864,21 @@ class ChatScreen(QWidget):
             QPushButton#chat_suggestion_2:hover,
             QPushButton#chat_suggestion_3:hover,
             QPushButton#chat_suggestion_4:hover {{
+                background-color: {GOLD_LIGHT};
+                border-color: {ECU_RED};
+            }}
+
+            QPushButton#chat_quick_action_button {{
+                background-color: {WHITE};
+                color: {CHARCOAL};
+                border: 1px solid {BORDER};
+                border-radius: {px(8)};
+                min-height: {px(34)};
+                padding: 0 {px(12)};
+                {font(12, 750)}
+            }}
+
+            QPushButton#chat_quick_action_button:hover {{
                 background-color: {GOLD_LIGHT};
                 border-color: {ECU_RED};
             }}

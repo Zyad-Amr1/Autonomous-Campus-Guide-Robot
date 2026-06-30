@@ -3,3 +3,6 @@ PySide6
 requests
 beautifulsoup4
 pypdf
+google-genai
+rapidfuzz
+python-dotenv

@@ -14,6 +14,7 @@ from database.repositories.log_repository import (
     get_most_frequent_queries,
     get_recent_logs,
     get_unmatched_questions,
+    log_chatbot_interaction,
     search_logs,
 )
 
@@ -233,3 +234,88 @@ def test_get_unmatched_questions_returns_only_logs_without_matched_faq(tmp_path)
     logs = get_unmatched_questions(db_path)
 
     assert [log["query_text"] for log in logs] == ["Is there an astronomy club?"]
+
+
+def test_log_chatbot_interaction_creates_logs_table_if_missing(tmp_path) -> None:
+    db_path = tmp_path / "chatbot_logs.db"
+
+    assert log_chatbot_interaction(db_path, "Where is engineering?", "database", True)
+
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'logs'
+            """
+        ).fetchone()
+        assert row is not None
+    finally:
+        connection.close()
+
+
+def test_log_chatbot_interaction_inserts_chatbot_interaction(tmp_path) -> None:
+    db_path = tmp_path / "chatbot_logs.db"
+
+    assert log_chatbot_interaction(
+        db_path,
+        "Where is engineering?",
+        "database",
+        True,
+        timestamp="2026-06-30T12:00:00",
+    )
+
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute("SELECT * FROM logs").fetchone()
+        assert row[1:] == (
+            "2026-06-30T12:00:00",
+            "chatbot_interaction",
+            "Where is engineering?",
+            "database",
+            1,
+        )
+    finally:
+        connection.close()
+
+
+def test_log_chatbot_interaction_works_with_existing_log_schema(tmp_path) -> None:
+    db_path = create_temp_db(tmp_path)
+
+    assert log_chatbot_interaction(db_path, "Where is engineering?", "database", True)
+
+    logs = get_recent_logs(limit=1, db_path=db_path)
+    assert logs[0]["query_text"] == "Where is engineering?"
+    assert logs[0]["screen_name"] == "chatbot_interaction"
+    assert logs[0]["response_text"] == "source_used=database; had_context=1"
+
+
+def test_log_chatbot_interaction_returns_false_on_failure(tmp_path) -> None:
+    assert (
+        log_chatbot_interaction(
+            tmp_path,
+            "Where is engineering?",
+            "database",
+            True,
+        )
+        is False
+    )
+
+
+def test_log_chatbot_interaction_returns_false_for_incompatible_logs_table(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "incompatible.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert (
+        log_chatbot_interaction(db_path, "Where is engineering?", "database", True)
+        is False
+    )

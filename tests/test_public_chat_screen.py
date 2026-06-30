@@ -23,14 +23,14 @@ class FakeChatController:
         self.questions.append(question)
         return {
             "answer": f"Dynamic answer for: {question}",
-            "confidence": "high",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
             "sources": self.sources,
-            "route": self.route,
-            "debug": {
-                "chunk_count_after": 4,
-                "auto_synced_database": False,
-                "source_counts": {"faq": 1},
-            },
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
         }
 
     def clear_memory(self) -> None:
@@ -55,11 +55,25 @@ class BlockingFakeChatController(FakeChatController):
         self.release.wait(timeout=2)
         return {
             "answer": f"Released answer for: {question}",
-            "confidence": "medium",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
             "sources": self.sources,
-            "route": "rag_fallback",
-            "debug": {"chunk_count_after": 4, "auto_synced_database": False},
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
         }
+
+
+class ThreadRecordingFakeChatController(FakeChatController):
+    def __init__(self) -> None:
+        super().__init__()
+        self.answer_thread_id: int | None = None
+
+    def answer_question(self, question: str) -> dict:
+        self.answer_thread_id = threading.get_ident()
+        return super().answer_question(question)
 
 
 class FailingFakeChatController(FakeChatController):
@@ -192,48 +206,99 @@ def test_sending_message_does_not_create_top_level_window() -> None:
         screen.close()
 
 
-def test_sources_are_displayed_when_returned() -> None:
+def test_matched_rooms_create_quick_action_button() -> None:
     application = _get_application()
     controller = FakeChatController()
-    controller.route = "rag_fallback"
-    controller.sources = [
-        {"source": "faq", "title": "How can I find a professor office?", "score": 72, "id": "faq:1"},
-        {"source": "professors", "title": "Ass. Prof. Dr. Marwa Taher", "score": 31, "id": "professors:1"},
-        {"source": "professors", "title": "Ass. Prof. Marian Mamdouh", "score": 31, "id": "professors:2"},
-    ]
+
+    def room_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "The cafeteria is in the Student Center.",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [
+                {"title": "Main Cafeteria", "content": "Student Center", "score": 92}
+            ],
+            "matched_professors": [],
+            "sources": [],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = room_answer
     screen = ChatScreen(controller=controller)
     try:
         assert application is not None
         screen.chat_input.setText("Where is cafeteria?")
         screen.send_message()
-        _process_until(lambda: len(screen.source_labels) == 1)
-        assert screen.source_labels
-        sources_area = screen.source_labels[-1]
-        assert sources_area.objectName() == "chat_sources_area"
-        assert "Sources:" in sources_area.text()
-        assert "- faq: How can I find a professor office?" in sources_area.text()
-        assert "- professors: Ass. Prof. Dr. Marwa Taher" in sources_area.text()
-        assert "- professors: Ass. Prof. Marian Mamdouh" in sources_area.text()
-        assert "score" not in sources_area.text()
-        assert "faq:1" not in sources_area.text()
-        assert _is_left_aligned(screen, sources_area)
-        _assert_message_is_not_top_level(screen, sources_area)
+        _process_until(lambda: len(screen.quick_action_buttons) == 1)
+        assert screen.quick_action_buttons[0].text() == "Open room: Main Cafeteria"
+        screen.quick_action_buttons[0].click()
+        assert screen.chat_input.text() == "Tell me more about room Main Cafeteria"
     finally:
         screen.close()
 
 
-def test_no_sources_are_displayed_for_no_context() -> None:
+def test_matched_professors_create_quick_action_button() -> None:
     application = _get_application()
     controller = FakeChatController()
-    controller.route = "no_context"
-    controller.sources = []
+
+    def professor_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Dr. Mona Samir teaches robotics.",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [
+                {"title": "Dr. Mona Samir", "content": "Robotics", "score": 90}
+            ],
+            "sources": [],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = professor_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Who are the professors?")
+        screen.send_message()
+        _process_until(lambda: len(screen.quick_action_buttons) == 1)
+        assert screen.quick_action_buttons[0].text() == "Professor: Dr. Mona Samir"
+    finally:
+        screen.close()
+
+
+def test_no_context_source_indicator_is_displayed() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def no_context_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": f"Dynamic answer for: {question}",
+            "had_context": False,
+            "source_used": "none",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [],
+            "gemini_status": "not_called",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = no_context_answer
     screen = ChatScreen(controller=controller)
     try:
         assert application is not None
         screen.chat_input.setText("Unknown topic")
         screen.send_message()
         _process_until(lambda: "Dynamic answer" in screen.message_labels[-1].text())
-        assert screen.source_labels == []
+        assert screen.source_labels
+        assert "Source: No matching ECU context found" in screen.source_labels[-1].text()
     finally:
         screen.close()
 
@@ -248,10 +313,14 @@ def test_no_context_answer_is_displayed_as_assistant_bubble() -> None:
         controller.questions.append(question)
         return {
             "answer": "I do not have enough information about that yet. Please sync or add university data in the Data section.",
-            "confidence": "low",
+            "had_context": False,
+            "source_used": "none",
+            "matched_rooms": [],
+            "matched_professors": [],
             "sources": [],
-            "route": "no_context",
-            "debug": {"chunk_count_after": 0, "auto_synced_database": False},
+            "gemini_status": "not_called",
+            "error": None,
+            "logged": True,
         }
 
     controller.answer_question = no_context_answer
@@ -264,8 +333,8 @@ def test_no_context_answer_is_displayed_as_assistant_bubble() -> None:
         assert screen.message_labels[-2].property("sender") == "user"
         assert screen.message_labels[-1].property("sender") == "bot"
         assert screen.message_labels[-1].text() != "?"
-        assert screen.source_labels == []
-        assert screen.chat_status_label.text() == "No context found | 0 chunks"
+        assert "Source: No matching ECU context found" in screen.source_labels[-1].text()
+        assert screen.chat_status_label.text() == "No ECU context found"
     finally:
         screen.close()
 
@@ -280,11 +349,14 @@ def test_useless_controller_answer_is_displayed_as_readable_message() -> None:
         controller.questions.append(question)
         return {
             "answer": "?",
-            "confidence": "low",
+            "had_context": False,
+            "source_used": "none",
+            "matched_rooms": [],
+            "matched_professors": [],
             "sources": [],
-            "route": "no_context",
-            "language": "en",
-            "debug": {"chunk_count_after": 0, "auto_synced_database": False},
+            "gemini_status": "not_called",
+            "error": None,
+            "logged": True,
         }
 
     controller.answer_question = useless_answer
@@ -295,10 +367,7 @@ def test_useless_controller_answer_is_displayed_as_readable_message() -> None:
         screen.send_message()
         _process_until(lambda: "I could not generate a useful answer" in screen.message_labels[-1].text())
         assert screen.message_labels[-1].text() != "?"
-        assert screen.message_labels[-1].text() == (
-            "I could not generate a useful answer. "
-            "Please try again or sync university data from the Data section."
-        )
+        assert screen.message_labels[-1].text() == "Sorry, I could not generate a useful answer. Please try again."
     finally:
         screen.close()
 
@@ -306,30 +375,33 @@ def test_useless_controller_answer_is_displayed_as_readable_message() -> None:
 def test_status_label_shows_route_and_source_count() -> None:
     application = _get_application()
     controller = FakeChatController()
-    controller.route = "rag_fallback"
     screen = ChatScreen(controller=controller)
     try:
         assert application is not None
         screen.chat_input.setText("Where is cafeteria?")
         screen.send_message()
-        _process_until(lambda: "Answered from rag_fallback" in screen.chat_status_label.text())
-        assert screen.chat_status_label.text() == "Answered from rag_fallback | 1 sources | high confidence"
+        _process_until(lambda: "Answered from ECU records" in screen.chat_status_label.text())
+        assert screen.chat_status_label.text() == "Answered from ECU records"
     finally:
         screen.close()
 
 
-def test_status_label_shows_auto_sync_chunk_count() -> None:
+def test_status_label_shows_website_source() -> None:
     application = _get_application()
     controller = FakeChatController()
 
     def auto_sync_answer(question: str) -> dict:
         controller.questions.append(question)
         return {
-            "answer": "Synced answer",
-            "confidence": "medium",
-            "sources": [{"source": "faq", "title": "One", "score": 44}],
-            "route": "rag_fallback",
-            "debug": {"chunk_count_after": 25, "auto_synced_database": True},
+            "answer": "Website answer",
+            "had_context": True,
+            "source_used": "ecu_website",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [{"source": "ecu_website", "title": "One", "url": "https://ecu.edu.eg/"}],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
         }
 
     controller.answer_question = auto_sync_answer
@@ -338,8 +410,258 @@ def test_status_label_shows_auto_sync_chunk_count() -> None:
         assert application is not None
         screen.chat_input.setText("Tell me about faculties")
         screen.send_message()
-        _process_until(lambda: screen.chat_status_label.text().startswith("Knowledge synced automatically"))
-        assert screen.chat_status_label.text() == "Knowledge synced automatically | 25 chunks"
+        _process_until(lambda: screen.chat_status_label.text() == "Answered from ecu.edu.eg")
+        assert screen.chat_status_label.text() == "Answered from ecu.edu.eg"
+    finally:
+        screen.close()
+
+
+def test_database_source_displays_ecu_records_indicator() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=FakeChatController())
+    try:
+        assert application is not None
+        screen.chat_input.setText("Where is cafeteria?")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        assert "Source: ECU records" in screen.source_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_website_source_displays_ecu_website_indicator() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def website_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Website answer",
+            "had_context": True,
+            "source_used": "ecu_website",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [
+                {
+                    "source": "ecu_website",
+                    "title": "Faculty of Engineering and Technology",
+                    "url": "https://ecu.edu.eg/faculties/engineering-and-technology/",
+                }
+            ],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = website_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Tell me about engineering")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        assert "Source: ecu.edu.eg" in screen.source_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_gemini_ok_message_appears_in_source_indicator() -> None:
+    application = _get_application()
+    screen = ChatScreen(controller=FakeChatController())
+    try:
+        assert application is not None
+        screen.chat_input.setText("Where is cafeteria?")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        assert "AI answer generated from retrieved ECU context" in screen.source_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_fallback_message_appears_when_gemini_not_ok_with_context() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def fallback_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Based on ECU records: Cafeteria.",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [{"source": "database", "source_table": "rooms", "title": "Cafeteria", "score": 90}],
+            "gemini_status": "rate_limited",
+            "error": "rate_limited",
+            "logged": True,
+        }
+
+    controller.answer_question = fallback_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Where is cafeteria?")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        assert "AI service unavailable - showing best available ECU match" in screen.source_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_database_source_details_are_displayed() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def database_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Professor answer",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [
+                {
+                    "source": "database",
+                    "source_table": "professors",
+                    "title": "Ass. Prof. Dr. Marwa Taher",
+                    "score": 88,
+                    "id": "professors:1",
+                }
+            ],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = database_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Who are the professors?")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        assert "- professors: Ass. Prof. Dr. Marwa Taher" in screen.source_labels[-1].text()
+        assert "professors:1" not in screen.source_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_website_source_details_are_displayed() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def website_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Engineering answer",
+            "had_context": True,
+            "source_used": "ecu_website",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [
+                {
+                    "source": "ecu_website",
+                    "title": "Faculty of Engineering and Technology",
+                    "url": "https://ecu.edu.eg/faculties/engineering-and-technology/",
+                }
+            ],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = website_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Tell me about engineering")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        assert "- ecu.edu.eg: Faculty of Engineering and Technology" in screen.source_labels[-1].text()
+    finally:
+        screen.close()
+
+
+def test_source_details_are_limited_to_three() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def many_sources_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Answer",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [
+                {"source": "database", "source_table": "rooms", "title": "Room A", "score": 90},
+                {"source": "database", "source_table": "rooms", "title": "Room B", "score": 80},
+                {"source": "database", "source_table": "rooms", "title": "Room C", "score": 70},
+                {"source": "database", "source_table": "rooms", "title": "Room D", "score": 65},
+            ],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = many_sources_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("rooms")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        text = screen.source_labels[-1].text()
+        assert "Room A" in text
+        assert "Room B" in text
+        assert "Room C" in text
+        assert "Room D" not in text
+    finally:
+        screen.close()
+
+
+def test_raw_json_debug_and_api_key_are_not_displayed_in_sources() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+
+    def secret_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "Answer",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [
+                {
+                    "source": "database",
+                    "source_table": "rooms",
+                    "title": "Cafeteria",
+                    "score": 90,
+                    "raw": {"api_key": "SECRET_KEY"},
+                    "debug": {"prompt": "hidden"},
+                }
+            ],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    controller.answer_question = secret_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("cafeteria")
+        screen.send_message()
+        _process_until(lambda: screen.source_labels)
+        text = screen.source_labels[-1].text()
+        assert "SECRET_KEY" not in text
+        assert "api_key" not in text
+        assert "debug" not in text
+        assert "prompt" not in text
+        assert "{" not in text
     finally:
         screen.close()
 
@@ -385,7 +707,96 @@ def test_message_send_is_responsive_while_worker_is_running() -> None:
         controller.release.set()
         _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
         assert screen.message_labels[-1].text().startswith("Released answer for:")
-        assert screen.chat_status_label.text() == "Answered from rag_fallback | 1 sources | medium confidence"
+        assert screen.chat_status_label.text() == "Answered from ECU records"
+    finally:
+        controller.release.set()
+        screen.close()
+
+
+def test_message_send_does_not_call_controller_on_main_thread() -> None:
+    application = _get_application()
+    controller = ThreadRecordingFakeChatController()
+    main_thread_id = threading.get_ident()
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Tell me about faculties")
+        screen.send_message()
+        _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
+
+        assert controller.questions == ["Tell me about faculties"]
+        assert controller.answer_thread_id is not None
+        assert controller.answer_thread_id != main_thread_id
+        assert screen.message_labels[-1].text() == "Dynamic answer for: Tell me about faculties"
+    finally:
+        screen.close()
+
+
+def test_default_chat_screen_uses_rag_service_without_real_external_calls(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    application = _get_application()
+    calls = {}
+    main_thread_id = threading.get_ident()
+    db_path = tmp_path / "ecu_robot.db"
+
+    def fake_rag_response(question, received_db_path):
+        calls["question"] = question
+        calls["db_path"] = received_db_path
+        calls["thread_id"] = threading.get_ident()
+        return {
+            "answer": "RAG answer",
+            "had_context": True,
+            "source_used": "database",
+            "matched_rooms": [],
+            "matched_professors": [],
+            "sources": [],
+            "gemini_status": "ok",
+            "error": None,
+            "logged": True,
+        }
+
+    monkeypatch.setattr(
+        "ui.public.screens.chat_screen.get_chatbot_response",
+        fake_rag_response,
+    )
+    screen = ChatScreen(db_path=db_path)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Tell me about engineering")
+        screen.send_message()
+        _process_until(lambda: screen.message_labels[-1].text() == "RAG answer")
+
+        assert calls["question"] == "Tell me about engineering"
+        assert calls["db_path"] == db_path
+        assert calls["thread_id"] != main_thread_id
+        assert screen.chat_status_label.text() == "Answered from ECU records"
+    finally:
+        screen.close()
+
+
+def test_second_send_is_blocked_while_worker_is_running() -> None:
+    application = _get_application()
+    controller = BlockingFakeChatController()
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("professors")
+        screen.send_message()
+        _process_until(lambda: controller.started.is_set())
+
+        screen.chat_input.setText("tell me about faculties")
+        screen.send_message()
+
+        assert controller.questions == ["professors"]
+        assert screen.chat_status_label.text() == "Please wait for the current answer."
+        assert screen.chat_send_button.isEnabled() is False
+
+        controller.release.set()
+        _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
+        assert controller.questions == ["professors"]
+        assert screen.message_labels[-1].text() == "Released answer for: professors"
     finally:
         controller.release.set()
         screen.close()
@@ -401,7 +812,7 @@ def test_worker_error_displays_friendly_message_and_reenables_send() -> None:
         assert screen.chat_send_button.isEnabled() is False
         _process_until(lambda: screen.chat_send_button.isEnabled(), timeout_ms=3000)
         assert screen.message_labels[-1].property("sender") == "bot"
-        assert screen.message_labels[-1].text() == "Sorry, I had a problem generating the answer. Please try again."
+        assert screen.message_labels[-1].text() == "Sorry, I could not generate a useful answer. Please try again."
         assert screen.chat_status_label.text() == "Assistant error. Please try again."
         assert screen.chat_send_button.isEnabled() is True
     finally:

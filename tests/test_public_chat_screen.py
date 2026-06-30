@@ -175,6 +175,35 @@ def test_no_context_answer_is_displayed_as_assistant_bubble() -> None:
         screen.close()
 
 
+def test_useless_controller_answer_is_displayed_as_readable_message() -> None:
+    application = _get_application()
+    controller = FakeChatController()
+    controller.route = "no_context"
+    controller.sources = []
+
+    def useless_answer(question: str) -> dict:
+        controller.questions.append(question)
+        return {
+            "answer": "?",
+            "confidence": "low",
+            "sources": [],
+            "route": "no_context",
+            "language": "en",
+            "debug": {"chunk_count_after": 0, "auto_synced_database": False},
+        }
+
+    controller.answer_question = useless_answer
+    screen = ChatScreen(controller=controller)
+    try:
+        assert application is not None
+        screen.chat_input.setText("Unknown topic")
+        screen.send_message()
+        _process_until(lambda: "I do not have enough information" in screen.message_labels[-1].text())
+        assert screen.message_labels[-1].text() != "?"
+    finally:
+        screen.close()
+
+
 def test_status_label_shows_route_and_source_count() -> None:
     application = _get_application()
     screen = ChatScreen(controller=FakeChatController())

@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
 )
 
 from controllers.public_chat_controller import PublicChatController
+from controllers.public_chat_controller import ARABIC_NO_CONTEXT
 from controllers.public_chat_controller import ENGLISH_NO_CONTEXT
+from controllers.public_chat_controller import is_useless_answer
 from ui.public.theme import (
     BORDER,
     CHARCOAL,
@@ -288,7 +290,9 @@ class ChatScreen(QWidget):
         self.chat_thinking_label.setText("")
         self.chat_send_button.setEnabled(True)
         self.chat_retry_button.setEnabled(bool(self._last_user_question))
-        answer = str(result.get("answer") or "").strip() or ENGLISH_NO_CONTEXT
+        answer = str(result.get("answer") or "").strip()
+        if is_useless_answer(answer):
+            answer = ARABIC_NO_CONTEXT if str(result.get("language", "")) == "ar" else ENGLISH_NO_CONTEXT
         self._start_typing_answer(answer, sources, route)
 
     def _handle_answer_error(self, _error: str, request_id: int) -> None:

@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from controllers.public_chat_controller import (
     ARABIC_NO_CONTEXT,
     ENGLISH_NO_CONTEXT,
     GroqChatProvider,
     PublicChatController,
+    is_useless_answer,
     load_groq_config,
+    resolve_db_path,
 )
 from controllers.rag.conversation_memory import ConversationMemory
 from controllers.rag.knowledge_chunker import build_knowledge_chunks
-from controllers.rag.knowledge_store import init_knowledge_store, mark_knowledge_dirty, upsert_knowledge_chunks
+from controllers.rag.knowledge_store import clear_knowledge_chunks, init_knowledge_store, mark_knowledge_dirty, upsert_knowledge_chunks
 from controllers.rag.prompt_builder import build_rag_prompt, detect_language
 from controllers.rag.retriever import retrieve_relevant_chunks
 from database.init_db import initialize_database
@@ -87,6 +90,67 @@ def _disable_real_groq(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_MODEL", raising=False)
     monkeypatch.setattr("controllers.public_chat_controller._project_root", lambda: tmp_path)
+
+
+def _professor_only_db(tmp_path):
+    db_path = tmp_path / "professor_only.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE professors (
+                id INTEGER PRIMARY KEY,
+                full_name TEXT,
+                title TEXT,
+                email TEXT,
+                phone TEXT,
+                office_hours TEXT,
+                bio TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO professors (full_name, title, email, phone, office_hours, bio)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Dr. Ahmed Samir",
+                "Associate Professor",
+                "ahmed.samir@ecu.edu.eg",
+                "123",
+                "Monday 10:00-12:00",
+                "Software engineering staff member.",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return db_path
+
+
+def test_default_db_path_resolves_to_project_root(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("controllers.public_chat_controller.get_project_root", lambda: tmp_path)
+
+    assert resolve_db_path() == tmp_path / "ecu_robot.db"
+    assert resolve_db_path("ecu_robot.db") == tmp_path / "ecu_robot.db"
+
+
+def test_temp_db_path_still_works(tmp_path) -> None:
+    db_path = tmp_path / "chat.db"
+
+    assert resolve_db_path(db_path) == db_path
+    assert resolve_db_path(str(db_path)) == db_path
+    assert resolve_db_path(Path("custom.db")) == Path("custom.db")
+
+
+def test_is_useless_answer_rejects_punctuation_only_text() -> None:
+    assert is_useless_answer("?") is True
+    assert is_useless_answer(".") is True
+    assert is_useless_answer("   ") is True
+    assert is_useless_answer("?!") is True
+    assert is_useless_answer("OK") is True
+    assert is_useless_answer("Useful answer.") is False
 
 
 def test_chunks_are_created_from_fake_sqlite_data(tmp_path) -> None:
@@ -280,6 +344,88 @@ def test_empty_knowledge_store_auto_syncs_database(tmp_path, monkeypatch) -> Non
     assert calls == [db_path]
     assert result["debug"]["auto_synced_database"] is True
     assert result["debug"]["chunk_count_before"] == 0
+
+
+def test_missing_knowledge_chunks_auto_syncs_professor_data(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    controller = PublicChatController(db_path=_professor_only_db(tmp_path))
+
+    result = controller.answer_question("who are the professors?")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "professors"
+    assert "Dr. Ahmed Samir" in result["answer"]
+    assert result["debug"]["auto_synced_database"] is True
+    assert result["debug"]["chunk_count_before"] == 0
+    assert result["debug"]["chunk_count_after"] > 0
+    assert result["debug"]["source_counts"]["professors"] == 1
+
+
+def test_empty_knowledge_chunks_auto_syncs_professor_data(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    db_path = _professor_only_db(tmp_path)
+    init_knowledge_store(db_path)
+    clear_knowledge_chunks(db_path)
+    controller = PublicChatController(db_path=db_path)
+
+    result = controller.answer_question("who are the professors?")
+
+    assert result["route"] != "no_context"
+    assert result["sources"][0]["source"] == "professors"
+    assert "Dr. Ahmed Samir" in result["answer"]
+    assert result["debug"]["auto_synced_database"] is True
+    assert result["debug"]["chunk_count_before"] == 0
+    assert result["debug"]["chunk_count_after"] > 0
+
+
+def test_missing_relevant_source_triggers_database_resync(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+    db_path = _db(tmp_path)
+    upsert_knowledge_chunks(
+        db_path,
+        [
+            {
+                "id": "rooms:custom",
+                "source": "rooms",
+                "title": "Only Room Chunk",
+                "content": "Room-only stale knowledge.",
+                "keywords": ["room"],
+                "language": "en",
+                "metadata": {},
+            }
+        ],
+    )
+    controller = PublicChatController(db_path=db_path)
+
+    result = controller.answer_question("who are the professors?")
+
+    assert result["route"] != "no_context"
+    assert any(source["source"] == "professors" for source in result["sources"])
+    assert "Dr. Mona Hassan" in result["answer"]
+    assert result["debug"]["auto_synced_database"] is True
+    assert result["debug"]["source_counts"]["professors"] >= 1
+
+
+def test_professor_integration_auto_syncs_and_ignores_question_mark_provider(tmp_path, monkeypatch) -> None:
+    _disable_real_groq(monkeypatch, tmp_path)
+
+    def useless_provider(_messages: list[dict[str, str]]) -> str:
+        return "?"
+
+    controller = PublicChatController(
+        db_path=_professor_only_db(tmp_path),
+        llm_provider=useless_provider,
+    )
+
+    result = controller.answer_question("who are the professors?")
+
+    assert result["route"] != "no_context"
+    assert result["route"] == "rag_fallback"
+    assert result["answer"] != "?"
+    assert "Dr. Ahmed Samir" in result["answer"]
+    assert result["debug"]["used_groq"] is False
+    assert result["debug"]["auto_synced_database"] is True
+    assert result["debug"]["chunk_count_after"] > 0
 
 
 def test_professor_question_retrieves_professor_chunk(tmp_path, monkeypatch) -> None:
@@ -518,6 +664,20 @@ def test_empty_provider_answer_falls_back_safely(tmp_path) -> None:
     result = controller.answer_question("Where is cafeteria?")
 
     assert result["route"] == "rag_fallback"
+    assert "Cafeteria" in result["answer"]
+    assert result["debug"]["used_groq"] is False
+
+
+def test_useless_provider_answer_falls_back_safely(tmp_path) -> None:
+    def useless_provider(_messages: list[dict[str, str]]) -> str:
+        return "?"
+
+    controller = PublicChatController(db_path=_db(tmp_path), llm_provider=useless_provider)
+
+    result = controller.answer_question("Where is cafeteria?")
+
+    assert result["route"] == "rag_fallback"
+    assert result["answer"] != "?"
     assert "Cafeteria" in result["answer"]
     assert result["debug"]["used_groq"] is False
 

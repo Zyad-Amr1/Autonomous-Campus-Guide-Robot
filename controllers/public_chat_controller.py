@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import string
 from pathlib import Path
 from typing import Any, Callable
 
@@ -37,7 +38,7 @@ LLMProvider = Callable[[list[dict[str, str]]], str | dict[str, Any]]
 
 ENGLISH_NO_CONTEXT = (
     "I do not have enough information about that yet. "
-    "Please sync or add university data in the Data section."
+    "Please add or sync university data from the Data section."
 )
 ARABIC_NO_CONTEXT = (
     "\u0644\u0627 \u0623\u0645\u0644\u0643 \u0645\u0639\u0644\u0648\u0645\u0627\u062a "
@@ -48,6 +49,15 @@ ARABIC_NO_CONTEXT = (
     "\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a."
 )
 GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+DATABASE_SOURCES_BY_INTENT = {
+    "faculty_info": {"faculties"},
+    "professor_info": {"professors"},
+    "room_location": {"rooms"},
+    "course_schedule": {"courses"},
+    "event_info": {"events"},
+    "admission_info": {"faq", "faculties"},
+    "general_info": {"faq", "faculties"},
+}
 
 
 def _is_arabic(text: str) -> bool:
@@ -56,11 +66,38 @@ def _is_arabic(text: str) -> bool:
 
 def _project_root() -> Path:
     """Return the repository root that contains the app's top-level folders."""
+    return get_project_root()
+
+
+def get_project_root() -> Path:
+    """Return the project root regardless of the current working directory."""
     current_file = Path(__file__).resolve()
     for folder in (current_file.parent, *current_file.parents):
         if all((folder / name).exists() for name in ("apps", "controllers", "database", "ui")):
             return folder
     return current_file.parents[1]
+
+
+def resolve_db_path(db_path: str | Path | None = None) -> Path:
+    """Resolve the chatbot database path without depending on the process cwd."""
+    if db_path is None or str(db_path) == DB_NAME:
+        return get_project_root() / DB_NAME
+    database_path = Path(db_path)
+    return database_path if database_path.is_absolute() else database_path
+
+
+def is_useless_answer(text: str) -> bool:
+    """Return whether an LLM/provider answer is too empty to show to visitors."""
+    cleaned_text = str(text or "").strip()
+    if not cleaned_text:
+        return True
+    punctuation = set(string.punctuation) | {"؟", "،", "؛", "。", "…"}
+    if all(character.isspace() or character in punctuation for character in cleaned_text):
+        return True
+    useful_characters = [
+        character for character in cleaned_text if character.isalnum() or "\u0600" <= character <= "\u06ff"
+    ]
+    return len(useful_characters) < 3
 
 
 def load_groq_config() -> dict[str, str]:
@@ -149,7 +186,7 @@ class PublicChatController:
         llm_provider: LLMProvider | None = None,
         conversation_memory: ConversationMemory | None = None,
     ) -> None:
-        self.db_path = db_path
+        self.db_path = resolve_db_path(db_path)
         self.llm_provider = llm_provider if llm_provider is not None else GroqChatProvider.from_environment()
         self.conversation_memory = conversation_memory or ConversationMemory()
 
@@ -179,6 +216,9 @@ class PublicChatController:
         retrieval_query = self._expanded_retrieval_query(cleaned_question, recent_messages)
         retrieval_intent = intent if intent != "unknown" else detect_intent(retrieval_query)
         retrieved_chunks = self._retrieve_chunks(retrieval_query, retrieval_intent)
+        if not retrieved_chunks:
+            self._ensure_database_knowledge_for_intent(retrieval_intent)
+            retrieved_chunks = self._retrieve_chunks(retrieval_query, retrieval_intent)
         sources = self._sources_from_chunks(retrieved_chunks)
 
         if not retrieved_chunks:
@@ -216,7 +256,7 @@ class PublicChatController:
                     if isinstance(provider_response, dict)
                     else str(provider_response).strip()
                 )
-                if answer:
+                if not is_useless_answer(answer):
                     route = "rag_groq"
                     used_groq = True
                     if self._answer_ignores_context(answer, retrieved_chunks):
@@ -401,6 +441,30 @@ class PublicChatController:
             self._last_auto_synced_database = True
         except Exception:
             self._last_auto_synced_database = False
+        finally:
+            self._last_chunk_count_after = self._safe_chunk_count()
+            self._last_source_counts = self._safe_source_counts()
+
+    def _ensure_database_knowledge_for_intent(self, intent: str | None) -> None:
+        """Rebuild database chunks when the store lacks chunks for the question type."""
+        if self._last_auto_synced_database:
+            self._last_chunk_count_after = self._safe_chunk_count()
+            self._last_source_counts = self._safe_source_counts()
+            return
+        required_sources = DATABASE_SOURCES_BY_INTENT.get(str(intent or ""))
+        current_sources = self._safe_source_counts()
+        needs_sync = not current_sources
+        if required_sources:
+            needs_sync = needs_sync or not any(current_sources.get(source, 0) > 0 for source in required_sources)
+        if not needs_sync:
+            self._last_chunk_count_after = self._safe_chunk_count()
+            self._last_source_counts = current_sources
+            return
+        try:
+            sync_database_to_knowledge_base(self.db_path)
+            self._last_auto_synced_database = True
+        except Exception:
+            return
         finally:
             self._last_chunk_count_after = self._safe_chunk_count()
             self._last_source_counts = self._safe_source_counts()

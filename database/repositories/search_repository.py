@@ -1,12 +1,14 @@
 """Fuzzy database retrieval for trusted local chatbot context."""
 
 import sqlite3
+import re
 from pathlib import Path
 from typing import Any
 
 from rapidfuzz import fuzz
 
 SEARCH_THRESHOLD = 45
+ROOM_CODE_PATTERN = re.compile(r"\b[a-z]\d{2,4}\b")
 
 _TABLE_CONFIG = {
     "faculties": {
@@ -70,7 +72,7 @@ def retrieve_from_database(
     limit: int = 5,
 ) -> list[dict]:
     """Return top fuzzy matches from trusted SQLite chatbot tables."""
-    normalized_query = query.strip()
+    normalized_query = normalize_search_text(query)
     if not normalized_query or limit <= 0:
         return []
 
@@ -97,7 +99,7 @@ def retrieve_from_database(
                 searchable_text = " ".join(
                     [table_name, *config["labels"], title, content]
                 )
-                score = _score_match(normalized_query, searchable_text)
+                score = _score_match(normalized_query, searchable_text, table_name)
 
                 if score >= SEARCH_THRESHOLD:
                     results.append(
@@ -115,6 +117,18 @@ def retrieve_from_database(
 
     results.sort(key=lambda result: result["score"], reverse=True)
     return results[:limit]
+
+
+def normalize_search_text(text: str | None) -> str:
+    """Normalize user and database text for forgiving search matching."""
+    if text is None:
+        return ""
+
+    normalized = str(text).casefold().strip()
+    normalized = re.sub(r"[-_]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"\b([a-z])\s+(\d{2,4})\b", r"\1\2", normalized)
+    return normalized.strip()
 
 
 def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
@@ -150,11 +164,65 @@ def _join_values(raw: dict[str, Any], fields: tuple[str, ...] | list[str]) -> st
     return " | ".join(values)
 
 
-def _score_match(query: str, searchable_text: str) -> int:
-    return int(
+def _score_match(query: str, searchable_text: str, table_name: str) -> int:
+    normalized_text = normalize_search_text(searchable_text)
+    query_compact = _compact_search_text(query)
+    text_compact = _compact_search_text(normalized_text)
+    query_codes = _extract_room_codes(query)
+    text_codes = _extract_room_codes(normalized_text)
+
+    score = int(
         max(
-            fuzz.partial_ratio(query, searchable_text),
-            fuzz.token_set_ratio(query, searchable_text),
-            fuzz.WRatio(query, searchable_text),
+            fuzz.partial_ratio(query, normalized_text),
+            fuzz.token_set_ratio(query, normalized_text),
+            fuzz.WRatio(query, normalized_text),
+            fuzz.partial_ratio(query_compact, text_compact) if query_compact else 0,
+            fuzz.WRatio(query_compact, text_compact) if query_compact else 0,
         )
     )
+
+    if query_codes and query_codes.intersection(text_codes):
+        if table_name in {"rooms", "courses"}:
+            score = max(score, 98)
+        else:
+            score = max(score, 70)
+
+    if _looks_like_room_or_location_query(query):
+        if table_name in {"rooms", "courses"}:
+            score = min(100, score + 10)
+        elif table_name == "faq":
+            score = min(score, SEARCH_THRESHOLD - 1)
+
+    return score
+
+
+def _compact_search_text(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+
+
+def _extract_room_codes(text: str) -> set[str]:
+    normalized = normalize_search_text(text)
+    compact = _compact_search_text(normalized)
+    return set(ROOM_CODE_PATTERN.findall(normalized)).union(
+        ROOM_CODE_PATTERN.findall(compact)
+    )
+
+
+def _looks_like_room_or_location_query(query: str) -> bool:
+    if _extract_room_codes(query):
+        return True
+
+    location_terms = (
+        "room",
+        "rooms",
+        "lab",
+        "laboratory",
+        "building",
+        "hall",
+        "cafeteria",
+        "cafetria",
+        "office",
+        "location",
+        "where",
+    )
+    return any(term in query for term in location_terms)

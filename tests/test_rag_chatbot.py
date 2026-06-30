@@ -1,3 +1,5 @@
+import sqlite3
+
 from services import rag_chatbot
 
 
@@ -20,6 +22,61 @@ def _website_result():
         "path": "faculties/engineering-and-technology/",
         "content": "Official ECU engineering website content.",
     }
+
+
+def _create_room_code_db(db_path):
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE rooms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_name TEXT,
+                room_number TEXT,
+                building TEXT,
+                floor INTEGER,
+                category TEXT,
+                description TEXT
+            );
+
+            CREATE TABLE faq (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT,
+                answer TEXT,
+                keywords TEXT,
+                category TEXT
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO rooms (room_name, room_number, building, floor, category, description)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Design Studio",
+                "D101",
+                "Building D",
+                1,
+                "Studio",
+                "Design classroom and student project space.",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO faq (question, answer, keywords, category)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "What is the default admin login?",
+                "Admins should use their assigned credentials.",
+                "admin login password",
+                "Administration",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def test_database_strong_match_uses_database_context(monkeypatch, tmp_path):
@@ -407,3 +464,44 @@ def test_returned_dict_includes_logged_boolean(monkeypatch, tmp_path):
     result = rag_chatbot.get_chatbot_response("unknown", tmp_path)
 
     assert isinstance(result["logged"], bool)
+
+
+def test_room_code_question_uses_d101_database_result(monkeypatch, tmp_path):
+    db_path = tmp_path / "rooms.db"
+    _create_room_code_db(db_path)
+    captured = {}
+    monkeypatch.setattr(rag_chatbot, "retrieve_from_website", lambda question: None)
+
+    def fake_ask(question, context):
+        captured["context"] = context
+        return {"ok": True, "answer": "D101 is the Design Studio.", "error_type": None}
+
+    monkeypatch.setattr(rag_chatbot, "ask_gemini", fake_ask)
+
+    result = rag_chatbot.get_chatbot_response("what is d101", db_path)
+
+    assert result["source_used"] == "database"
+    assert result["answer"] == "D101 is the Design Studio."
+    assert result["matched_rooms"][0]["title"] == "Design Studio | D101"
+    assert captured["context"][0]["source_table"] == "rooms"
+
+
+def test_room_code_question_does_not_use_unrelated_admin_login_faq(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "rooms.db"
+    _create_room_code_db(db_path)
+    captured = {}
+    monkeypatch.setattr(rag_chatbot, "retrieve_from_website", lambda question: None)
+
+    def fake_ask(question, context):
+        captured["context"] = context
+        return {"ok": True, "answer": context[0]["title"], "error_type": None}
+
+    monkeypatch.setattr(rag_chatbot, "ask_gemini", fake_ask)
+
+    rag_chatbot.get_chatbot_response("what is d101", db_path)
+
+    assert captured["context"][0]["source_table"] == "rooms"
+    assert captured["context"][0]["title"] != "What is the default admin login?"

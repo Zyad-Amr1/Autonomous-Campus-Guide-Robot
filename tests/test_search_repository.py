@@ -1,6 +1,9 @@
 import sqlite3
 
-from database.repositories.search_repository import retrieve_from_database
+from database.repositories.search_repository import (
+    normalize_search_text,
+    retrieve_from_database,
+)
 
 
 def _create_search_db(db_path):
@@ -87,6 +90,20 @@ def _create_search_db(db_path):
         )
         connection.execute(
             """
+            INSERT INTO rooms (room_name, room_number, building, floor, category, description)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Design Studio",
+                "D101",
+                "Building D",
+                1,
+                "Studio",
+                "Design classroom and student project space.",
+            ),
+        )
+        connection.execute(
+            """
             INSERT INTO faq (question, answer, keywords, category)
             VALUES (?, ?, ?, ?)
             """,
@@ -95,6 +112,18 @@ def _create_search_db(db_path):
                 "Submit your admission documents online.",
                 "admission apply documents",
                 "Admissions",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO faq (question, answer, keywords, category)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "What is the default admin login?",
+                "Admins should use their assigned credentials.",
+                "admin login password",
+                "Administration",
             ),
         )
         connection.commit()
@@ -209,3 +238,91 @@ def test_limit_parameter_works(tmp_path):
     results = retrieve_from_database("engineering professor cafeteria faq", db_path, limit=2)
 
     assert len(results) == 2
+
+
+def test_normalize_search_text_handles_room_code_variants():
+    assert normalize_search_text(" D101 ") == "d101"
+    assert normalize_search_text("D 101") == "d101"
+    assert normalize_search_text("d-101") == "d101"
+    assert normalize_search_text("d_101") == "d101"
+    assert normalize_search_text(None) == ""
+
+
+def test_lowercase_room_code_matches_uppercase_d101(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("d101", db_path)
+
+    assert results[0]["source_table"] == "rooms"
+    assert "D101" in results[0]["title"]
+
+
+def test_spaced_room_code_matches_d101(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("D 101", db_path)
+
+    assert results[0]["source_table"] == "rooms"
+    assert "D101" in results[0]["title"]
+
+
+def test_hyphenated_room_code_matches_d101(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("d-101", db_path)
+
+    assert results[0]["source_table"] == "rooms"
+    assert "D101" in results[0]["title"]
+
+
+def test_room_code_matching_is_case_insensitive(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    lower_results = retrieve_from_database("d101", db_path)
+    upper_results = retrieve_from_database("D101", db_path)
+
+    assert lower_results[0]["title"] == upper_results[0]["title"]
+
+
+def test_typo_profesors_still_matches_professors(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("profesors", db_path)
+
+    assert results[0]["source_table"] == "professors"
+
+
+def test_typo_cafetria_still_matches_cafeteria(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("cafetria", db_path)
+
+    assert results[0]["source_table"] == "rooms"
+    assert "Cafeteria" in results[0]["title"]
+
+
+def test_room_code_query_does_not_return_unrelated_faq_as_top_result(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("what is d101", db_path)
+
+    assert results
+    assert results[0]["source_table"] == "rooms"
+    assert "D101" in results[0]["title"]
+    assert results[0]["title"] != "What is the default admin login?"
+
+
+def test_arabic_query_does_not_crash(tmp_path):
+    db_path = tmp_path / "search.db"
+    _create_search_db(db_path)
+
+    results = retrieve_from_database("أين القاعة d101؟", db_path)
+
+    assert isinstance(results, list)

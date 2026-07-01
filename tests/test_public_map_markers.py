@@ -490,6 +490,24 @@ def test_clicking_static_landmark_still_works() -> None:
         canvas.close()
 
 
+def test_clicking_each_static_landmark_hotspot_still_works() -> None:
+    application = _get_application()
+    canvas = MapCanvas()
+    clicked = []
+    canvas.landmark_clicked = clicked.append
+    expected_landmarks = tuple(canvas.landmarks)
+    try:
+        assert application is not None
+        _render_canvas(canvas)
+        for landmark in expected_landmarks:
+            _click_canvas(canvas, canvas._point_for_name(landmark))
+            assert canvas.selected_landmark == landmark
+            assert canvas.selected_marker is None
+        assert clicked == list(expected_landmarks)
+    finally:
+        canvas.close()
+
+
 def test_selected_database_marker_highlight_state_is_stored() -> None:
     application = _get_application()
     canvas = MapCanvas()

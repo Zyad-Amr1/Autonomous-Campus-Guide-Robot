@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QCompleter,
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -46,19 +47,19 @@ from ui.public.theme import (
 
 
 LANDMARKS = {
-    "Building A": (565, 500),
-    "Building B": (450, 770),
-    "Building C": (275, 700),
-    "Building D": (305, 540),
-    "Building E": (500, 205),
-    "Cafeteria": (320, 385),
-    "Parking": (525, 55),
-    "Stadium": (860, 235),
-    "Workshop 1": (95, 675),
-    "Workshop 2": (290, 270),
-    "Boys\u2019 Musallah": (765, 585),
-    "Girls\u2019 Musallah": (800, 420),
-    "Student Activity": (785, 510),
+    "Building A": (575, 493),
+    "Building B": (466, 766),
+    "Building C": (258, 728),
+    "Building D": (282, 545),
+    "Building E": (501, 193),
+    "Cafeteria": (310, 421),
+    "Parking": (523, 56),
+    "Stadium": (867, 234),
+    "Workshop 1": (125, 706),
+    "Workshop 2": (299, 234),
+    "Boys\u2019 Musallah": (775, 607),
+    "Girls\u2019 Musallah": (800, 424),
+    "Student Activity": (798, 518),
 }
 
 LANDMARK_DETAILS = {
@@ -170,6 +171,7 @@ class MapCanvas(QWidget):
         self.selected_marker_payload: dict | None = None
         self.landmark_clicked = None
         self.marker_clicked = None
+        self.debug_map_overlays = False
         self._image_target_rect = QRectF()
         self._marker_hit_radius = 18
         self._zoom_factor = self.MIN_ZOOM_FACTOR
@@ -418,155 +420,99 @@ class MapCanvas(QWidget):
         painter.drawText(
             rect.adjusted(28, 28, -28, -28),
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Campus map image not found: assets/maps/campus_outdoor_map.png",
+            "Campus map image not found: assets/maps/real_campus_map.jpg",
         )
 
     def _draw_route(self, painter: QPainter) -> None:
-        """Draw the current route as a polished ECU accent polyline."""
+        """Draw the current route as a polished navigation polyline."""
         if len(self.current_route) < 2:
             return
         path = QPainterPath(self._point_for_name(self.current_route[0]))
         for node in self.current_route[1:]:
             path.lineTo(self._point_for_name(node))
-        shadow_path = path.translated(2, 2)
-        painter.setPen(QPen(QColor(20, 24, 31, 58), 13, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        route_blue = QColor("#1A73E8")
+        shadow_path = path.translated(1.6, 2.0)
+        painter.setPen(QPen(QColor(18, 25, 38, 54), 10, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(shadow_path)
-        painter.setPen(QPen(QColor(255, 255, 255, 210), 11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(QColor(255, 255, 255, 190), 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
-        painter.setPen(QPen(QColor(ECU_RED), 7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.drawPath(path)
-        painter.setPen(QPen(QColor(GOLD), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(route_blue, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
 
     def _draw_route_start_pulse(self, painter: QPainter) -> None:
-        """Draw a subtle active-route "you are here" pulse around the start."""
-        if len(self.current_route) < 2 or self.route_start not in self.path_points:
+        """Draw small route endpoint rings without restoring marker clutter."""
+        if len(self.current_route) < 2:
             return
-        center = self._point_for_name(self.route_start)
-        phase = min(1.0, max(0.0, self._route_start_pulse_phase))
-        radius = 13 + phase * 15
-        opacity = round(72 * (1.0 - phase))
 
-        painter.save()
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(34, 160, 107, opacity))
-        painter.drawEllipse(center, radius, radius)
-        painter.setPen(QPen(QColor(255, 255, 255, round(95 * (1.0 - phase))), 2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(center, radius, radius)
-        painter.restore()
+        endpoints = (
+            (self.route_start, QColor("#1F8A5B"), self._route_start_pulse_phase),
+            (self.route_destination, QColor(GOLD), 0.0),
+        )
+        for name, accent, phase in endpoints:
+            if name not in self.path_points:
+                continue
+            is_selected = name == self.selected_landmark
+            radius = 6.5 + (1.2 * phase if name == self.route_start else 0.0)
+            opacity = 98 if is_selected else 72
+            self._draw_subtle_selection_ring(
+                painter,
+                self._point_for_name(name),
+                accent,
+                0.0,
+                ring_radius=radius,
+                glow_opacity=18,
+                ring_opacity=opacity,
+            )
 
     def _draw_landmark_hotspots(self, painter: QPainter) -> None:
-        """Draw subtle clickable pins near real map labels, not fake dot fields."""
-        for name in self.landmarks:
-            center = self._point_for_name(name)
-            is_start = name == self.route_start
-            is_destination = name == self.route_destination
-            is_selected = name == self.selected_landmark
-            fill = QColor(WHITE)
-            border = QColor(CHARCOAL)
-            radius = 5
-            if is_start:
-                fill = QColor("#22A06B")
-                border = QColor(WHITE)
-                radius = 8
-            elif is_destination:
-                fill = QColor(ECU_RED)
-                border = QColor(WHITE)
-                radius = 9
-            elif is_selected:
-                fill = QColor(GOLD_LIGHT)
-                border = QColor(ECU_RED)
-                radius = 8
-            pulse = self._selection_animation_pulse(f"landmark:{name}") if is_selected else 0.0
-            radius += pulse * 2.5
-
-            pin_path = QPainterPath()
-            pin_path.addEllipse(center, radius, radius)
-            pin_tip = QPointF(center.x(), center.y() + radius + 7)
-            pin_path.moveTo(center.x() - radius * 0.45, center.y() + radius * 0.55)
-            pin_path.lineTo(pin_tip)
-            pin_path.lineTo(center.x() + radius * 0.45, center.y() + radius * 0.55)
-            pin_path.closeSubpath()
-            if pulse > 0:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(215, 25, 32, round(42 * pulse)))
-                painter.drawEllipse(center, radius + 5 * pulse, radius + 5 * pulse)
-            painter.setPen(QPen(QColor(0, 0, 0, 35), 3))
-            painter.setBrush(QColor(0, 0, 0, 28))
-            painter.drawPath(pin_path.translated(0, 2))
-            painter.setPen(QPen(border, 2))
-            painter.setBrush(fill)
-            painter.drawPath(pin_path)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(CHARCOAL) if fill != QColor(ECU_RED) else QColor(WHITE))
-            painter.drawEllipse(center, max(2, radius - 5), max(2, radius - 5))
-
-    def _draw_database_markers(self, painter: QPainter) -> None:
-        """Draw database-driven room markers using normalized image coordinates."""
-        if not self.database_markers:
+        """Draw only the active selection; invisible hotspots remain clickable."""
+        if self.selected_landmark is None:
             return
 
-        painter.save()
-        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
-        ordered_markers = [
-            marker for marker in self.database_markers if not self._is_selected_marker(marker)
-        ]
-        ordered_markers.extend(
-            marker for marker in self.database_markers if self._is_selected_marker(marker)
+        center = self._point_for_name(self.selected_landmark)
+        self._draw_subtle_selection_ring(
+            painter,
+            center,
+            QColor(ECU_RED),
+            self._selection_animation_pulse(f"landmark:{self.selected_landmark}"),
         )
-        for marker in ordered_markers:
-            point = self._point_for_marker(marker)
-            title = self._marker_title(marker)
-            accent = QColor(self.marker_color(marker.get("category")))
-            is_selected = self._is_selected_marker(marker)
-            pulse = self._selection_animation_pulse(self._marker_animation_key(marker)) if is_selected else 0.0
-            border = QColor(ECU_RED if is_selected else "#8A6500")
-            pin_radius = (7 if is_selected else 6) + pulse * 2.2
-            label_border = QColor(ECU_RED if is_selected else "#D8DEE7")
 
-            label_width = min(178, max(92, len(title) * 7 + 20))
-            label_rect = QRectF(point.x() + 11, point.y() - 29, label_width, 24)
-            if label_rect.right() > self._image_target_rect.right() - 6:
-                label_rect.moveRight(point.x() - 11)
-            if label_rect.left() < self._image_target_rect.left() + 6:
-                label_rect.moveLeft(point.x() + 11)
-            if label_rect.top() < self._image_target_rect.top() + 6:
-                label_rect.moveTop(point.y() + 13)
+    def _draw_database_markers(self, painter: QPainter) -> None:
+        """Draw only the active database marker selection ring."""
+        if self.selected_marker is None:
+            return
 
-            painter.setPen(QPen(QColor(60, 45, 0, 90), 1))
-            painter.drawLine(point, QPointF(label_rect.left(), label_rect.center().y()))
+        point = self._point_for_marker(self.selected_marker)
+        self._draw_subtle_selection_ring(
+            painter,
+            point,
+            QColor(self.marker_color(self.selected_marker.get("category"))),
+            self._selection_animation_pulse(self._marker_animation_key(self.selected_marker)),
+        )
 
-            pin_path = QPainterPath()
-            pin_center = QPointF(point.x(), point.y() - 7)
-            pin_path.addEllipse(pin_center, pin_radius, pin_radius)
-            pin_path.moveTo(point.x() - 4, point.y() - 2)
-            pin_path.lineTo(point)
-            pin_path.lineTo(point.x() + 4, point.y() - 2)
-            pin_path.closeSubpath()
-            if pulse > 0:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(215, 25, 32, round(38 * pulse)))
-                painter.drawEllipse(pin_center, pin_radius + 5 * pulse, pin_radius + 5 * pulse)
-            painter.setPen(QPen(QColor(0, 0, 0, 35), 2))
-            painter.setBrush(QColor(0, 0, 0, 28))
-            painter.drawPath(pin_path.translated(0, 2))
-            painter.setPen(QPen(border, 1.4))
-            painter.setBrush(accent)
-            painter.drawPath(pin_path)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(WHITE))
-            painter.drawEllipse(pin_center, 2.2, 2.2)
+    def _draw_subtle_selection_ring(
+        self,
+        painter: QPainter,
+        center: QPointF,
+        accent: QColor,
+        pulse: float,
+        ring_radius: float = 7.5,
+        glow_opacity: int = 42,
+        ring_opacity: int = 150,
+    ) -> None:
+        """Draw a small non-filled ring for the single selected hotspot."""
+        active_ring_radius = ring_radius + pulse * 2.0
+        glow_radius = active_ring_radius + 4.5 + pulse * 2.0
 
-            painter.setPen(QPen(label_border, 1.4 if is_selected else 1))
-            painter.setBrush(QColor(255, 255, 255, 236))
-            painter.drawRoundedRect(label_rect, 8, 8)
-            painter.setPen(QColor(TEXT_DARK))
-            painter.drawText(
-                label_rect.adjusted(9, 1, -8, -1),
-                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                title,
-            )
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), glow_opacity), 5))
+        painter.drawEllipse(center, glow_radius, glow_radius)
+        painter.setPen(QPen(QColor(255, 255, 255, 185), 3))
+        painter.drawEllipse(center, active_ring_radius, active_ring_radius)
+        painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), ring_opacity), 1.6))
+        painter.drawEllipse(center, active_ring_radius, active_ring_radius)
         painter.restore()
 
     def _draw_walker(self, painter: QPainter) -> None:
@@ -783,7 +729,7 @@ class MapCanvas(QWidget):
 class MapScreen(QWidget):
     """Display campus walking navigation over the real ECU map."""
 
-    MAP_IMAGE_PATH = "assets/maps/campus_outdoor_map.png"
+    MAP_IMAGE_PATH = "assets/maps/real_campus_map.jpg"
 
     def __init__(
         self,
@@ -910,7 +856,7 @@ class MapScreen(QWidget):
         self.map_reset_view_button = QPushButton("Reset")
         self.map_reset_view_button.setObjectName("map_reset_view_button")
         for button in (self.map_zoom_in_button, self.map_zoom_out_button, self.map_reset_view_button):
-            button.setMinimumHeight(40)
+            button.setMinimumHeight(34)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
 
         controls_layout.addWidget(self.map_search_input, stretch=3)
@@ -921,20 +867,32 @@ class MapScreen(QWidget):
         controls_layout.addWidget(self.map_to_combo, stretch=2)
         controls_layout.addWidget(self.map_find_route_button)
         controls_layout.addWidget(self.map_reset_route_button)
-        controls_layout.addWidget(self.map_zoom_out_button)
-        controls_layout.addWidget(self.map_zoom_in_button)
-        controls_layout.addWidget(self.map_reset_view_button)
         page_layout.addWidget(controls)
 
         body_layout = QHBoxLayout()
         body_layout.setSpacing(14)
+        map_area = QWidget()
+        map_area.setObjectName("map_canvas_area")
+        map_area_layout = QGridLayout(map_area)
+        map_area_layout.setContentsMargins(0, 0, 0, 0)
+        map_area_layout.setSpacing(0)
         self.map_canvas = MapCanvas(self.map_image_path)
         self.map_canvas.landmark_clicked = self._handle_landmark_click
         self.map_canvas.marker_clicked = self._handle_database_marker_click
         self.map_zoom_in_button.clicked.connect(self.map_canvas.zoom_in)
         self.map_zoom_out_button.clicked.connect(self.map_canvas.zoom_out)
         self.map_reset_view_button.clicked.connect(self.map_canvas.reset_view)
-        body_layout.addWidget(self.map_canvas, stretch=3)
+        map_area_layout.addWidget(self.map_canvas, 0, 0)
+        zoom_controls = QFrame()
+        zoom_controls.setObjectName("map_zoom_controls")
+        zoom_layout = QHBoxLayout(zoom_controls)
+        zoom_layout.setContentsMargins(6, 6, 6, 6)
+        zoom_layout.setSpacing(5)
+        zoom_layout.addWidget(self.map_zoom_out_button)
+        zoom_layout.addWidget(self.map_zoom_in_button)
+        zoom_layout.addWidget(self.map_reset_view_button)
+        map_area_layout.addWidget(zoom_controls, 0, 0, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        body_layout.addWidget(map_area, stretch=3)
         body_layout.addWidget(self._create_info_panel(), stretch=1)
         page_layout.addLayout(body_layout, stretch=1)
 
@@ -1113,7 +1071,8 @@ class MapScreen(QWidget):
         minutes = max(1, round(self._route_distance(route) / 95))
         self.map_info_title.setText(self._t("map_route_ready", "Route ready"))
         self.map_route_info_label.setText(
-            f"{self._t('map_route_label', 'Route')}: {start} \u2192 {destination}\n"
+            f"{self._t('map_from', 'From')}: {start}\n"
+            f"{self._t('map_to', 'To')}: {destination}\n"
             f"{self._t('map_estimated_time', 'Estimated walking time')}: {minutes} min"
         )
         self.map_route_steps_label.setText("\n".join(self._route_steps(route)))
@@ -1367,14 +1326,30 @@ class MapScreen(QWidget):
 
             QPushButton#map_zoom_in_button,
             QPushButton#map_zoom_out_button {{
-                min-width: {px(38)};
-                max-width: {px(38)};
+                min-width: {px(34)};
+                max-width: {px(34)};
+                min-height: {px(34)};
+                max-height: {px(34)};
                 padding: 0;
                 {font(17, 850)}
             }}
 
             QPushButton#map_reset_view_button {{
-                min-width: {px(92)};
+                min-width: {px(76)};
+                max-width: {px(76)};
+                min-height: {px(34)};
+                max-height: {px(34)};
+                padding-left: {px(10)};
+                padding-right: {px(10)};
+                {font(12, 800)}
+            }}
+
+            QFrame#map_zoom_controls {{
+                background-color: rgba(255, 255, 255, 220);
+                border: 1px solid rgba(34, 43, 55, 42);
+                border-radius: {px(8)};
+                margin-top: {px(12)};
+                margin-right: {px(12)};
             }}
 
             QPushButton:disabled {{

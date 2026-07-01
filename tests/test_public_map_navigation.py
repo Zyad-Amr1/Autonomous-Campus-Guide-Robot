@@ -42,11 +42,11 @@ def test_from_to_combo_boxes_exist() -> None:
 def test_map_image_path_support_exists() -> None:
     application = _get_application()
     screen = MapScreen()
-    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/campus_outdoor_map.png"
+    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/real_campus_map.jpg"
     try:
         assert application is not None
-        assert screen.map_image_path == "assets/maps/campus_outdoor_map.png"
-        assert screen.map_canvas.background_image_path == "assets/maps/campus_outdoor_map.png"
+        assert screen.map_image_path == "assets/maps/real_campus_map.jpg"
+        assert screen.map_canvas.background_image_path == "assets/maps/real_campus_map.jpg"
         assert screen.map_canvas.resolved_background_image_path == expected_path
     finally:
         screen.close()
@@ -219,6 +219,30 @@ def test_searching_cafeteria_selects_and_highlights_landmark() -> None:
         screen.close()
 
 
+def test_searching_key_real_map_landmarks_selects_correct_hotspot() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    search_targets = (
+        "Building A",
+        "Cafeteria",
+        "Parking",
+        "Stadium",
+        "Student Activity",
+        "Boys\u2019 Musallah",
+        "Girls\u2019 Musallah",
+    )
+    try:
+        assert application is not None
+        for landmark in search_targets:
+            screen.map_search_input.setText(landmark)
+            screen.search_landmark()
+            assert screen.selected_landmark == landmark
+            assert screen.map_canvas.selected_landmark == landmark
+            assert screen.map_info_title.text() == landmark
+    finally:
+        screen.close()
+
+
 def test_partial_search_selects_cafeteria() -> None:
     application = _get_application()
     screen = MapScreen()
@@ -284,7 +308,9 @@ def test_find_route_updates_current_route() -> None:
         assert screen.current_route[-1] == "Cafeteria"
         assert screen.map_canvas.current_route == screen.current_route
         assert screen.map_canvas.route_start_pulse_active is True
-        assert "Route: Building A" in screen.map_route_info_label.text()
+        route_info = screen.map_route_info_label.text()
+        assert "From: Building A" in route_info
+        assert "To: Cafeteria" in route_info
     finally:
         screen.close()
 

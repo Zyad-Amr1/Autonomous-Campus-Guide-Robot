@@ -176,14 +176,14 @@ def test_map_screen_zoom_buttons_control_canvas_zoom() -> None:
 def test_map_screen_resolves_default_image_path_from_project_root() -> None:
     application = _get_application()
     screen = MapScreen()
-    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/campus_outdoor_map.png"
+    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/real_campus_map.jpg"
     try:
         assert application is not None
-        assert screen.map_image_path == "assets/maps/campus_outdoor_map.png"
-        assert screen.map_canvas.background_image_path == "assets/maps/campus_outdoor_map.png"
+        assert screen.map_image_path == "assets/maps/real_campus_map.jpg"
+        assert screen.map_canvas.background_image_path == "assets/maps/real_campus_map.jpg"
         assert screen.map_canvas.resolved_background_image_path == expected_path
-        assert screen.map_canvas.map_image_path.endswith("assets\\maps\\campus_outdoor_map.png") or (
-            screen.map_canvas.map_image_path.endswith("assets/maps/campus_outdoor_map.png")
+        assert screen.map_canvas.map_image_path.endswith("assets\\maps\\real_campus_map.jpg") or (
+            screen.map_canvas.map_image_path.endswith("assets/maps/real_campus_map.jpg")
         )
     finally:
         screen.close()

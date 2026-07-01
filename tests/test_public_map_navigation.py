@@ -42,11 +42,11 @@ def test_from_to_combo_boxes_exist() -> None:
 def test_map_image_path_support_exists() -> None:
     application = _get_application()
     screen = MapScreen()
-    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/ecu_campus_map.png"
+    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/campus_outdoor_map.png"
     try:
         assert application is not None
-        assert screen.map_image_path == "assets/maps/ecu_campus_map.png"
-        assert screen.map_canvas.background_image_path == "assets/maps/ecu_campus_map.png"
+        assert screen.map_image_path == "assets/maps/campus_outdoor_map.png"
+        assert screen.map_canvas.background_image_path == "assets/maps/campus_outdoor_map.png"
         assert screen.map_canvas.resolved_background_image_path == expected_path
     finally:
         screen.close()
@@ -275,6 +275,7 @@ def test_find_route_updates_current_route() -> None:
     screen = MapScreen()
     try:
         assert application is not None
+        assert screen.map_canvas.route_start_pulse_active is False
         screen.map_from_combo.setCurrentText("Building A")
         screen.map_to_combo.setCurrentText("Cafeteria")
         screen.find_route()
@@ -282,7 +283,47 @@ def test_find_route_updates_current_route() -> None:
         assert screen.current_route[0] == "Building A"
         assert screen.current_route[-1] == "Cafeteria"
         assert screen.map_canvas.current_route == screen.current_route
+        assert screen.map_canvas.route_start_pulse_active is True
         assert "Route: Building A" in screen.map_route_info_label.text()
+    finally:
+        screen.close()
+
+
+def test_route_start_pulse_updates_safely_when_route_exists() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        assert screen.map_canvas.route_start_pulse_active is False
+        assert screen.map_canvas.pulse_phase == 0.0
+
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        previous_phase = screen.map_canvas.pulse_phase
+        screen.map_canvas._advance_route_start_pulse()
+
+        assert screen.map_canvas.route_start_pulse_active is True
+        assert screen.map_canvas.pulse_phase > previous_phase
+    finally:
+        screen.close()
+
+
+def test_find_route_still_works_after_zoom() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        screen.map_canvas.zoom_in()
+        screen.map_canvas.zoom_in()
+        screen.map_from_combo.setCurrentText("Building A")
+        screen.map_to_combo.setCurrentText("Cafeteria")
+        screen.find_route()
+        assert screen.map_canvas.zoom_factor > 1.0
+        assert screen.current_route[0] == "Building A"
+        assert screen.current_route[-1] == "Cafeteria"
+        assert screen.map_canvas.current_route == screen.current_route
+        assert screen.map_canvas.route_start_pulse_active is True
     finally:
         screen.close()
 
@@ -311,9 +352,12 @@ def test_reset_clears_current_route() -> None:
         screen.map_from_combo.setCurrentText("Building A")
         screen.map_to_combo.setCurrentText("Cafeteria")
         screen.find_route()
+        assert screen.map_canvas.route_start_pulse_active is True
         screen.reset_route()
         assert screen.current_route == []
         assert screen.map_canvas.current_route == []
+        assert screen.map_canvas.route_start_pulse_active is False
+        assert screen.map_canvas.pulse_phase == 0.0
         assert screen.map_route_steps_label.text() == ""
         assert screen.is_walking is False
     finally:

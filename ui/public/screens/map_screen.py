@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from database.connection import DB_NAME
+from database.repositories.room_repository import get_mappable_rooms
 from ui.public.theme import (
     BORDER,
     BUTTON_HEIGHT,
@@ -140,6 +142,10 @@ def _project_root() -> Path:
 class MapCanvas(QWidget):
     """Display the real ECU map image with route and hotspot overlays."""
 
+    MIN_ZOOM_FACTOR = 1.0
+    MAX_ZOOM_FACTOR = 2.5
+    ZOOM_STEP = 0.15
+
     def __init__(self, background_image_path: str | None = None) -> None:
         super().__init__()
         self.setObjectName("map_canvas")
@@ -153,20 +159,49 @@ class MapCanvas(QWidget):
         self._background_pixmap = QPixmap()
         self.landmarks = LANDMARKS.copy()
         self.path_points = {**PATH_NODES, **self.landmarks}
+        self.database_markers: list[dict] = []
+        self.markers = self.database_markers
         self.current_route: list[str] = []
         self.route_start: str | None = None
         self.route_destination: str | None = None
         self.walking_progress: float | None = None
         self.selected_landmark: str | None = None
+        self.selected_marker: dict | None = None
+        self.selected_marker_payload: dict | None = None
         self.landmark_clicked = None
+        self.marker_clicked = None
         self._image_target_rect = QRectF()
         self._marker_hit_radius = 18
-        self._zoom_factor = 1.0
+        self._zoom_factor = self.MIN_ZOOM_FACTOR
         self._pan_offset = QPointF(0, 0)
         self._is_panning = False
         self._last_pan_position = QPointF()
+        self._selection_animation_key: str | None = None
+        self._selection_animation_progress = 1.0
+        self._selection_animation_timer = QTimer(self)
+        self._selection_animation_timer.setInterval(16)
+        self._selection_animation_timer.timeout.connect(self._advance_selection_animation)
+        self._route_start_pulse_phase = 0.0
+        self._route_start_pulse_timer = QTimer(self)
+        self._route_start_pulse_timer.setInterval(40)
+        self._route_start_pulse_timer.timeout.connect(self._advance_route_start_pulse)
         if background_image_path is not None:
             self.set_background_image(background_image_path)
+
+    @property
+    def zoom_factor(self) -> float:
+        """Return the current map zoom level."""
+        return self._zoom_factor
+
+    @property
+    def pulse_phase(self) -> float:
+        """Return the current route start pulse phase."""
+        return self._route_start_pulse_phase
+
+    @property
+    def route_start_pulse_active(self) -> bool:
+        """Return whether the active-route start pulse is running."""
+        return self._route_start_pulse_timer.isActive()
 
     def set_background_image(self, path: str) -> None:
         """Set a campus map image path and repaint the canvas."""
@@ -180,12 +215,36 @@ class MapCanvas(QWidget):
         self._background_pixmap = QPixmap(str(image_path)) if self.map_image_exists else QPixmap()
         self.update()
 
+    def set_markers(self, markers: list[dict] | None) -> None:
+        """Store normalized database markers for rendering on the map."""
+        valid_markers: list[dict] = []
+        for marker in markers or []:
+            if not isinstance(marker, dict):
+                continue
+            x_coord = self._normalized_marker_coord(marker.get("x_coord"))
+            y_coord = self._normalized_marker_coord(marker.get("y_coord"))
+            if x_coord is None or y_coord is None:
+                continue
+            if x_coord == 0 and y_coord == 0:
+                continue
+            stored_marker = dict(marker)
+            stored_marker["x_coord"] = x_coord
+            stored_marker["y_coord"] = y_coord
+            valid_markers.append(stored_marker)
+        self.database_markers = valid_markers
+        self.markers = self.database_markers
+        self.update()
+
     def set_route(self, route: list[str], start: str, destination: str) -> None:
         """Store and draw a selected walking route."""
         self.current_route = route
         self.route_start = start
         self.route_destination = destination
         self.walking_progress = None
+        if len(route) >= 2 and start in self.path_points:
+            self._start_route_start_pulse()
+        else:
+            self._stop_route_start_pulse()
         self.update()
 
     def clear_route(self) -> None:
@@ -194,6 +253,7 @@ class MapCanvas(QWidget):
         self.route_start = None
         self.route_destination = None
         self.walking_progress = None
+        self._stop_route_start_pulse()
         self.update()
 
     def set_walking_progress(self, progress: float | None) -> None:
@@ -206,11 +266,30 @@ class MapCanvas(QWidget):
         if landmark not in self.landmarks:
             return
         self.selected_landmark = landmark
+        self.selected_marker = None
+        self.selected_marker_payload = None
+        self._is_panning = False
+        self._start_selection_animation(f"landmark:{landmark}")
         self.update()
 
-    def clear_selection(self) -> None:
-        """Clear selected landmark highlight."""
+    def select_marker(self, marker: dict) -> dict:
+        """Highlight a database marker and return its public selection payload."""
+        self.selected_marker = marker
+        self.selected_marker_payload = self._marker_selection_payload(marker)
         self.selected_landmark = None
+        self._is_panning = False
+        self._start_selection_animation(self._marker_animation_key(marker))
+        self.update()
+        return self.selected_marker_payload
+
+    def clear_selection(self) -> None:
+        """Clear selected landmark and database marker highlights."""
+        self.selected_landmark = None
+        self.selected_marker = None
+        self.selected_marker_payload = None
+        self._selection_animation_key = None
+        self._selection_animation_progress = 1.0
+        self._selection_animation_timer.stop()
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -232,11 +311,13 @@ class MapCanvas(QWidget):
 
         self._draw_background_image(painter, canvas_rect)
         self._draw_route(painter)
+        self._draw_route_start_pulse(painter)
         self._draw_landmark_hotspots(painter)
+        self._draw_database_markers(painter)
         self._draw_walker(painter)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        """Select a landmark when a user taps near its clean hotspot."""
+        """Select a landmark or database marker when tapped."""
         if event.button() == Qt.MouseButton.LeftButton:
             for name in reversed(list(self.landmarks)):
                 center = self._point_for_name(name)
@@ -249,6 +330,12 @@ class MapCanvas(QWidget):
                     if self.landmark_clicked is not None:
                         self.landmark_clicked(name)
                     return
+            marker = self._marker_at_position(event.position())
+            if marker is not None:
+                payload = self.select_marker(marker)
+                if self.marker_clicked is not None:
+                    self.marker_clicked(payload)
+                return
             self._is_panning = True
             self._last_pan_position = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -284,21 +371,21 @@ class MapCanvas(QWidget):
 
     def zoom_in(self) -> None:
         """Increase map zoom without distorting the real image."""
-        self._zoom_factor = min(2.2, self._zoom_factor + 0.15)
+        self._zoom_factor = min(self.MAX_ZOOM_FACTOR, self._zoom_factor + self.ZOOM_STEP)
         self._constrain_pan()
         self.update()
 
     def zoom_out(self) -> None:
         """Decrease map zoom and keep the image centered at fit size."""
-        self._zoom_factor = max(1.0, self._zoom_factor - 0.15)
-        if self._zoom_factor == 1.0:
+        self._zoom_factor = max(self.MIN_ZOOM_FACTOR, self._zoom_factor - self.ZOOM_STEP)
+        if self._zoom_factor == self.MIN_ZOOM_FACTOR:
             self._pan_offset = QPointF(0, 0)
         self._constrain_pan()
         self.update()
 
     def reset_view(self) -> None:
         """Return the map to its fitted viewport."""
-        self._zoom_factor = 1.0
+        self._zoom_factor = self.MIN_ZOOM_FACTOR
         self._pan_offset = QPointF(0, 0)
         self.update()
 
@@ -331,7 +418,7 @@ class MapCanvas(QWidget):
         painter.drawText(
             rect.adjusted(28, 28, -28, -28),
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Campus map image not found: assets/maps/ecu_campus_map.png",
+            "Campus map image not found: assets/maps/campus_outdoor_map.png",
         )
 
     def _draw_route(self, painter: QPainter) -> None:
@@ -341,12 +428,33 @@ class MapCanvas(QWidget):
         path = QPainterPath(self._point_for_name(self.current_route[0]))
         for node in self.current_route[1:]:
             path.lineTo(self._point_for_name(node))
+        shadow_path = path.translated(2, 2)
+        painter.setPen(QPen(QColor(20, 24, 31, 58), 13, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPath(shadow_path)
         painter.setPen(QPen(QColor(255, 255, 255, 210), 11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
         painter.setPen(QPen(QColor(ECU_RED), 7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
         painter.setPen(QPen(QColor(GOLD), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
+
+    def _draw_route_start_pulse(self, painter: QPainter) -> None:
+        """Draw a subtle active-route "you are here" pulse around the start."""
+        if len(self.current_route) < 2 or self.route_start not in self.path_points:
+            return
+        center = self._point_for_name(self.route_start)
+        phase = min(1.0, max(0.0, self._route_start_pulse_phase))
+        radius = 13 + phase * 15
+        opacity = round(72 * (1.0 - phase))
+
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(34, 160, 107, opacity))
+        painter.drawEllipse(center, radius, radius)
+        painter.setPen(QPen(QColor(255, 255, 255, round(95 * (1.0 - phase))), 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(center, radius, radius)
+        painter.restore()
 
     def _draw_landmark_hotspots(self, painter: QPainter) -> None:
         """Draw subtle clickable pins near real map labels, not fake dot fields."""
@@ -370,6 +478,8 @@ class MapCanvas(QWidget):
                 fill = QColor(GOLD_LIGHT)
                 border = QColor(ECU_RED)
                 radius = 8
+            pulse = self._selection_animation_pulse(f"landmark:{name}") if is_selected else 0.0
+            radius += pulse * 2.5
 
             pin_path = QPainterPath()
             pin_path.addEllipse(center, radius, radius)
@@ -378,6 +488,10 @@ class MapCanvas(QWidget):
             pin_path.lineTo(pin_tip)
             pin_path.lineTo(center.x() + radius * 0.45, center.y() + radius * 0.55)
             pin_path.closeSubpath()
+            if pulse > 0:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(215, 25, 32, round(42 * pulse)))
+                painter.drawEllipse(center, radius + 5 * pulse, radius + 5 * pulse)
             painter.setPen(QPen(QColor(0, 0, 0, 35), 3))
             painter.setBrush(QColor(0, 0, 0, 28))
             painter.drawPath(pin_path.translated(0, 2))
@@ -388,11 +502,82 @@ class MapCanvas(QWidget):
             painter.setBrush(QColor(CHARCOAL) if fill != QColor(ECU_RED) else QColor(WHITE))
             painter.drawEllipse(center, max(2, radius - 5), max(2, radius - 5))
 
+    def _draw_database_markers(self, painter: QPainter) -> None:
+        """Draw database-driven room markers using normalized image coordinates."""
+        if not self.database_markers:
+            return
+
+        painter.save()
+        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+        ordered_markers = [
+            marker for marker in self.database_markers if not self._is_selected_marker(marker)
+        ]
+        ordered_markers.extend(
+            marker for marker in self.database_markers if self._is_selected_marker(marker)
+        )
+        for marker in ordered_markers:
+            point = self._point_for_marker(marker)
+            title = self._marker_title(marker)
+            accent = QColor(self.marker_color(marker.get("category")))
+            is_selected = self._is_selected_marker(marker)
+            pulse = self._selection_animation_pulse(self._marker_animation_key(marker)) if is_selected else 0.0
+            border = QColor(ECU_RED if is_selected else "#8A6500")
+            pin_radius = (7 if is_selected else 6) + pulse * 2.2
+            label_border = QColor(ECU_RED if is_selected else "#D8DEE7")
+
+            label_width = min(178, max(92, len(title) * 7 + 20))
+            label_rect = QRectF(point.x() + 11, point.y() - 29, label_width, 24)
+            if label_rect.right() > self._image_target_rect.right() - 6:
+                label_rect.moveRight(point.x() - 11)
+            if label_rect.left() < self._image_target_rect.left() + 6:
+                label_rect.moveLeft(point.x() + 11)
+            if label_rect.top() < self._image_target_rect.top() + 6:
+                label_rect.moveTop(point.y() + 13)
+
+            painter.setPen(QPen(QColor(60, 45, 0, 90), 1))
+            painter.drawLine(point, QPointF(label_rect.left(), label_rect.center().y()))
+
+            pin_path = QPainterPath()
+            pin_center = QPointF(point.x(), point.y() - 7)
+            pin_path.addEllipse(pin_center, pin_radius, pin_radius)
+            pin_path.moveTo(point.x() - 4, point.y() - 2)
+            pin_path.lineTo(point)
+            pin_path.lineTo(point.x() + 4, point.y() - 2)
+            pin_path.closeSubpath()
+            if pulse > 0:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(215, 25, 32, round(38 * pulse)))
+                painter.drawEllipse(pin_center, pin_radius + 5 * pulse, pin_radius + 5 * pulse)
+            painter.setPen(QPen(QColor(0, 0, 0, 35), 2))
+            painter.setBrush(QColor(0, 0, 0, 28))
+            painter.drawPath(pin_path.translated(0, 2))
+            painter.setPen(QPen(border, 1.4))
+            painter.setBrush(accent)
+            painter.drawPath(pin_path)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(WHITE))
+            painter.drawEllipse(pin_center, 2.2, 2.2)
+
+            painter.setPen(QPen(label_border, 1.4 if is_selected else 1))
+            painter.setBrush(QColor(255, 255, 255, 236))
+            painter.drawRoundedRect(label_rect, 8, 8)
+            painter.setPen(QColor(TEXT_DARK))
+            painter.drawText(
+                label_rect.adjusted(9, 1, -8, -1),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                title,
+            )
+        painter.restore()
+
     def _draw_walker(self, painter: QPainter) -> None:
         """Draw the animated current-location marker on top of the route."""
         if self.walking_progress is None or len(self.current_route) < 2:
             return
         position = self._point_for_route_progress(self.walking_progress)
+        shadow_position = position + QPointF(2, 2)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(20, 24, 31, 50))
+        painter.drawEllipse(shadow_position, 14, 14)
         painter.setPen(QPen(QColor(WHITE), 5))
         painter.setBrush(QColor(NAVY_DARK))
         painter.drawEllipse(position, 13, 13)
@@ -412,6 +597,141 @@ class MapCanvas(QWidget):
             rect.left() + rect.width() * (x_value / 1000),
             rect.top() + rect.height() * (y_value / 1000),
         )
+
+    def _point_for_marker(self, marker: dict) -> QPointF:
+        """Convert a stored normalized marker into a canvas point."""
+        rect = (
+            self._image_target_rect
+            if self._image_target_rect.isValid()
+            else QRectF(self.rect().adjusted(8, 8, -8, -8))
+        )
+        return QPointF(
+            rect.left() + rect.width() * marker["x_coord"],
+            rect.top() + rect.height() * marker["y_coord"],
+        )
+
+    def _marker_at_position(self, position: QPointF) -> dict | None:
+        """Return the topmost database marker close enough to a click."""
+        for marker in reversed(self.database_markers):
+            point = self._point_for_marker(marker)
+            delta = point - position
+            if delta.x() * delta.x() + delta.y() * delta.y() <= self._marker_hit_radius**2:
+                return marker
+        return None
+
+    def _is_selected_marker(self, marker: dict) -> bool:
+        """Return whether a marker is the active database selection."""
+        if self.selected_marker is None:
+            return False
+        if marker is self.selected_marker:
+            return True
+        return marker.get("id") is not None and marker.get("id") == self.selected_marker.get("id")
+
+    def _marker_animation_key(self, marker: dict) -> str:
+        """Return a stable animation key for a database marker selection."""
+        marker_id = marker.get("id")
+        if marker_id is not None:
+            return f"marker:id:{marker_id}"
+        return f"marker:title:{self._marker_title(marker)}"
+
+    def _start_selection_animation(self, key: str) -> None:
+        """Start one short selected-marker pulse for a new selection."""
+        if self._selection_animation_key == key and self._selection_animation_timer.isActive():
+            return
+        if self._selection_animation_key == key and self._selection_animation_progress < 1.0:
+            return
+        self._selection_animation_key = key
+        self._selection_animation_progress = 0.0
+        self._selection_animation_timer.start()
+
+    def _advance_selection_animation(self) -> None:
+        """Advance the short QPainter-based selected marker animation."""
+        self._selection_animation_progress = min(1.0, self._selection_animation_progress + 0.08)
+        if self._selection_animation_progress >= 1.0:
+            self._selection_animation_timer.stop()
+        self.update()
+
+    def _selection_animation_pulse(self, key: str) -> float:
+        """Return a decaying pulse strength for the active selected marker."""
+        if self._selection_animation_key != key:
+            return 0.0
+        progress = min(1.0, max(0.0, self._selection_animation_progress))
+        return (1.0 - progress) * (1.0 - progress)
+
+    def _start_route_start_pulse(self) -> None:
+        """Start the continuous active-route start pulse."""
+        self._route_start_pulse_phase = 0.0
+        if not self._route_start_pulse_timer.isActive():
+            self._route_start_pulse_timer.start()
+
+    def _stop_route_start_pulse(self) -> None:
+        """Stop and reset the active-route start pulse."""
+        self._route_start_pulse_timer.stop()
+        self._route_start_pulse_phase = 0.0
+
+    def _advance_route_start_pulse(self) -> None:
+        """Advance the active-route start pulse safely."""
+        if len(self.current_route) < 2 or self.route_start not in self.path_points:
+            self._stop_route_start_pulse()
+            self.update()
+            return
+        self._route_start_pulse_phase = (self._route_start_pulse_phase + 0.045) % 1.0
+        self.update()
+
+    def marker_color(self, category: str | None) -> str:
+        """Return the stable accent color for a database marker category."""
+        normalized = str(category or "other").strip().casefold()
+        if "library" in normalized:
+            return "#3BAA6B"
+        if "office" in normalized:
+            return "#8E5CF7"
+        if "lab" in normalized:
+            return "#2F80ED"
+        if "class" in normalized:
+            return "#22A06B"
+        if "service" in normalized or "cafeteria" in normalized:
+            return "#E67E22"
+        return GOLD
+
+    def _marker_title(self, marker: dict) -> str:
+        """Return a compact display title for a database marker."""
+        title = (
+            marker.get("title")
+            or marker.get("room_name")
+            or marker.get("name")
+            or marker.get("room_number")
+            or "Campus marker"
+        )
+        title = " ".join(str(title).split())
+        if len(title) > 28:
+            return f"{title[:25]}..."
+        return title
+
+    def _marker_selection_payload(self, marker: dict) -> dict:
+        """Return a clean public payload for database marker selection."""
+        return {
+            "type": "database_marker",
+            "title": self._marker_title(marker),
+            "room_name": marker.get("room_name"),
+            "room_number": marker.get("room_number"),
+            "category": marker.get("category"),
+            "building": marker.get("building"),
+            "floor": marker.get("floor"),
+            "description": marker.get("description"),
+            "raw": marker.get("raw") or {},
+        }
+
+    def _normalized_marker_coord(self, value) -> float | None:
+        """Validate a normalized marker coordinate."""
+        try:
+            coordinate = float(value)
+        except (TypeError, ValueError):
+            return None
+        if 0 <= coordinate <= 1:
+            return coordinate
+        if 10 <= coordinate <= 1000:
+            return coordinate / 1000
+        return None
 
     def _point_for_route_progress(self, progress: float) -> QPointF:
         """Return the canvas point at a normalized progress along the route."""
@@ -443,7 +763,7 @@ class MapCanvas(QWidget):
 
     def _constrain_pan(self) -> None:
         """Keep zoomed image edges near the viewport."""
-        if self._background_pixmap.isNull() or self._zoom_factor <= 1.0:
+        if self._background_pixmap.isNull() or self._zoom_factor <= self.MIN_ZOOM_FACTOR:
             self._pan_offset = QPointF(0, 0)
             return
         rect = QRectF(self.rect().adjusted(3, 3, -3, -3))
@@ -463,16 +783,23 @@ class MapCanvas(QWidget):
 class MapScreen(QWidget):
     """Display campus walking navigation over the real ECU map."""
 
-    MAP_IMAGE_PATH = "assets/maps/ecu_campus_map.png"
+    MAP_IMAGE_PATH = "assets/maps/campus_outdoor_map.png"
 
-    def __init__(self, map_image_path: str | None = None) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        parent: QWidget | None = None,
+        map_image_path: str | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.db_path = db_path or DB_NAME
         self.map_image_path = map_image_path or self.MAP_IMAGE_PATH
         self.landmarks = LANDMARKS.copy()
         self.path_points = {**PATH_NODES, **self.landmarks}
         self.walking_graph = {key: tuple(value) for key, value in WALKING_GRAPH.items()}
         self.current_route: list[str] = []
         self.selected_landmark: str | None = None
+        self.selected_database_marker: dict | None = None
         self.walking_progress = 0.0
         self.is_walking = False
         self.walk_timer = QTimer(self)
@@ -482,7 +809,43 @@ class MapScreen(QWidget):
         self.setObjectName("map_screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
+        self._load_database_markers()
         self._apply_styles()
+
+    def _load_database_markers(self) -> None:
+        """Load room coordinate rows into the canvas without affecting routing."""
+        markers: list[dict] = []
+        try:
+            rows = get_mappable_rooms(self.db_path)
+        except Exception:
+            rows = []
+
+        for row in rows:
+            raw = self._room_row_to_dict(row)
+            title = raw.get("room_name") or raw.get("room_number") or "Room"
+            markers.append(
+                {
+                    "id": raw.get("id"),
+                    "title": title,
+                    "room_name": raw.get("room_name"),
+                    "room_number": raw.get("room_number"),
+                    "category": raw.get("category"),
+                    "description": raw.get("description"),
+                    "building": raw.get("building"),
+                    "floor": raw.get("floor"),
+                    "x_coord": raw.get("x_coord"),
+                    "y_coord": raw.get("y_coord"),
+                    "raw": raw,
+                }
+            )
+        self.map_canvas.set_markers(markers)
+
+    def _room_row_to_dict(self, row) -> dict:
+        """Convert sqlite row-like room records to a plain dict."""
+        try:
+            return {key: row[key] for key in row.keys()}
+        except AttributeError:
+            return dict(row)
 
     def _build_ui(self) -> None:
         """Arrange route controls, map canvas, and info panel."""
@@ -544,7 +907,7 @@ class MapScreen(QWidget):
         self.map_zoom_in_button.setObjectName("map_zoom_in_button")
         self.map_zoom_out_button = QPushButton("-")
         self.map_zoom_out_button.setObjectName("map_zoom_out_button")
-        self.map_reset_view_button = QPushButton("Reset View")
+        self.map_reset_view_button = QPushButton("Reset")
         self.map_reset_view_button.setObjectName("map_reset_view_button")
         for button in (self.map_zoom_in_button, self.map_zoom_out_button, self.map_reset_view_button):
             button.setMinimumHeight(40)
@@ -567,6 +930,7 @@ class MapScreen(QWidget):
         body_layout.setSpacing(14)
         self.map_canvas = MapCanvas(self.map_image_path)
         self.map_canvas.landmark_clicked = self._handle_landmark_click
+        self.map_canvas.marker_clicked = self._handle_database_marker_click
         self.map_zoom_in_button.clicked.connect(self.map_canvas.zoom_in)
         self.map_zoom_out_button.clicked.connect(self.map_canvas.zoom_out)
         self.map_reset_view_button.clicked.connect(self.map_canvas.reset_view)
@@ -648,6 +1012,11 @@ class MapScreen(QWidget):
         partial_match = next((name for name in self.landmarks if query.casefold() in name.casefold()), None)
         match = exact_match or partial_match
         if match is None:
+            marker = self._find_database_marker(query)
+            if marker is not None:
+                self.select_database_marker(marker)
+                self.map_search_input.setText(marker.get("title") or marker.get("room_name") or "")
+                return
             self.map_info_title.setText(
                 self._t("map_search_not_found_title", "No landmark found")
             )
@@ -666,6 +1035,7 @@ class MapScreen(QWidget):
         if landmark not in self.landmarks:
             return
         self.selected_landmark = landmark
+        self.selected_database_marker = None
         self.map_canvas.select_landmark(landmark)
         category, description = LANDMARK_DETAILS.get(landmark, ("Campus Landmark", "Campus place on the walking map."))
         self.map_info_title.setText(landmark)
@@ -676,6 +1046,11 @@ class MapScreen(QWidget):
             f"{self._t('map_type_category', 'Type/category')}: {category}\n{description}"
         )
         self.map_set_destination_button.setEnabled(True)
+
+    def select_database_marker(self, marker: dict) -> None:
+        """Select a database marker and show its room/location details."""
+        payload = self.map_canvas.select_marker(marker)
+        self._show_database_marker_details(payload)
 
     def set_selected_as_destination(self) -> None:
         """Use the selected landmark as the route destination."""
@@ -822,6 +1197,56 @@ class MapScreen(QWidget):
     def _handle_landmark_click(self, landmark: str) -> None:
         """Show clicked landmark context in the route info panel."""
         self.select_landmark(landmark)
+
+    def _handle_database_marker_click(self, marker: dict) -> None:
+        """Show clicked database marker context in the route info panel."""
+        self._show_database_marker_details(marker)
+
+    def _show_database_marker_details(self, marker: dict) -> None:
+        """Render a selected database marker in the existing info panel."""
+        self.selected_landmark = None
+        self.selected_database_marker = marker
+        title = marker.get("title") or marker.get("room_name") or marker.get("room_number") or "Selected place"
+        self.map_info_title.setText(str(title))
+        self.map_route_info_label.setText(self._t("map_selected_database_marker", "Selected room/location"))
+        self.map_selected_place_label.setText(self._database_marker_detail_text(marker))
+        self.map_route_steps_label.setText("")
+        self.map_set_destination_button.setEnabled(False)
+
+    def _database_marker_detail_text(self, marker: dict) -> str:
+        """Format database marker details while skipping missing fields."""
+        lines: list[str] = []
+        for label, key in (
+            ("Room", "room_number"),
+            ("Category", "category"),
+            ("Building", "building"),
+            ("Floor", "floor"),
+            ("Description", "description"),
+        ):
+            value = marker.get(key)
+            if value not in (None, ""):
+                lines.append(f"{label}: {value}")
+        return "\n".join(lines) if lines else "No additional details available."
+
+    def _find_database_marker(self, query: str) -> dict | None:
+        """Find a loaded database marker by room name, number, or category."""
+        normalized_query = query.strip().casefold()
+        if not normalized_query:
+            return None
+        for marker in self.map_canvas.markers:
+            searchable_values = (
+                marker.get("title"),
+                marker.get("room_name"),
+                marker.get("room_number"),
+                marker.get("category"),
+            )
+            if any(
+                normalized_query in str(value).casefold()
+                for value in searchable_values
+                if value not in (None, "")
+            ):
+                return marker
+        return None
 
     def _distance(self, first: str, second: str) -> float:
         """Return Euclidean distance between two normalized map points."""

@@ -124,17 +124,66 @@ def test_map_canvas_supports_background_image_path(tmp_path) -> None:
         canvas.close()
 
 
+def test_map_canvas_zoom_factor_defaults_and_controls_bounds() -> None:
+    application = _get_application()
+    canvas = MapCanvas()
+    try:
+        assert application is not None
+        assert canvas.zoom_factor == 1.0
+
+        canvas.zoom_in()
+        assert canvas.zoom_factor > 1.0
+
+        for _ in range(40):
+            canvas.zoom_in()
+        assert canvas.zoom_factor == canvas.MAX_ZOOM_FACTOR
+
+        canvas.zoom_out()
+        assert canvas.zoom_factor < canvas.MAX_ZOOM_FACTOR
+
+        for _ in range(40):
+            canvas.zoom_out()
+        assert canvas.zoom_factor == canvas.MIN_ZOOM_FACTOR
+
+        canvas.zoom_in()
+        canvas.reset_view()
+        assert canvas.zoom_factor == 1.0
+    finally:
+        canvas.close()
+
+
+def test_map_screen_zoom_buttons_control_canvas_zoom() -> None:
+    application = _get_application()
+    screen = MapScreen()
+    try:
+        assert application is not None
+        assert screen.map_reset_view_button.text() == "Reset"
+        assert screen.map_canvas.zoom_factor == 1.0
+
+        screen.map_zoom_in_button.click()
+        assert screen.map_canvas.zoom_factor > 1.0
+
+        screen.map_zoom_out_button.click()
+        assert screen.map_canvas.zoom_factor == 1.0
+
+        screen.map_zoom_in_button.click()
+        screen.map_reset_view_button.click()
+        assert screen.map_canvas.zoom_factor == 1.0
+    finally:
+        screen.close()
+
+
 def test_map_screen_resolves_default_image_path_from_project_root() -> None:
     application = _get_application()
     screen = MapScreen()
-    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/ecu_campus_map.png"
+    expected_path = Path(__file__).resolve().parents[1] / "assets/maps/campus_outdoor_map.png"
     try:
         assert application is not None
-        assert screen.map_image_path == "assets/maps/ecu_campus_map.png"
-        assert screen.map_canvas.background_image_path == "assets/maps/ecu_campus_map.png"
+        assert screen.map_image_path == "assets/maps/campus_outdoor_map.png"
+        assert screen.map_canvas.background_image_path == "assets/maps/campus_outdoor_map.png"
         assert screen.map_canvas.resolved_background_image_path == expected_path
-        assert screen.map_canvas.map_image_path.endswith("assets\\maps\\ecu_campus_map.png") or (
-            screen.map_canvas.map_image_path.endswith("assets/maps/ecu_campus_map.png")
+        assert screen.map_canvas.map_image_path.endswith("assets\\maps\\campus_outdoor_map.png") or (
+            screen.map_canvas.map_image_path.endswith("assets/maps/campus_outdoor_map.png")
         )
     finally:
         screen.close()
